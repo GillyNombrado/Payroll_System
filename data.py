@@ -165,11 +165,6 @@ DEFAULT_EMPLOYEE_ACCOUNT = {
 # 3. AUTHENTICATION ACCOUNTS
 # ==============================================================================
 LOGIN_ACCOUNTS = {
-    "employee@gmail.com": {
-        "password": "12345678",
-        "role": "Employee",
-        "target_script": "eDashboard.py"
-    },
     "admin@gmail.com": {
         "password": "123456789",
         "role": "Admin",

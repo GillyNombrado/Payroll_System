@@ -45,14 +45,21 @@ class SteadypayAdminDashboard(tk.Tk):
         self.employees = get_all_employees()
         self.filtered_employees = list(self.employees)
 
+        # Track current page and sidebar button widget references
+        self.current_page = None
+        self.sidebar_buttons = []
+
         self.setup_layout()
 
     def setup_layout(self):
         # 1. Left Fixed Sidebar
         self.create_sidebar()
 
-        # 2. Right Main Scrollable Area
+        # 2. Right Main Scrollable Area (empty container)
         self.create_scrollable_main_content()
+
+        # 3. Show Dashboard by default
+        self.show_page("dashboard")
 
     # ==========================================
     # SIDEBAR NAVIGATION
@@ -81,20 +88,26 @@ class SteadypayAdminDashboard(tk.Tk):
         )
         logo_text.pack(side="left")
 
-        # Navigation Menu List
+        # Bind logo click to navigate back to Dashboard
+        for w in (logo_frame, logo_canvas, logo_text):
+            w.bind("<Button-1>", lambda e: self.show_page("dashboard"))
+            w.configure(cursor="hand2")
+
+        # Navigation Menu List (active state is set dynamically by show_page)
         menu_items = [
-            ("👥", "Employee\nmanagement", True),
-            ("💳", "Process payroll", False),
-            ("📄", "Payroll records", False),
-            ("📑", "Generate payslips", False),
-            ("⚙️", "Settings", False)
+            ("👥", "Employee\nmanagement"),
+            ("💳", "Process payroll"),
+            ("📄", "Payroll records"),
+            ("📑", "Generate payslips"),
+            ("⚙️", "Settings")
         ]
 
-        for icon, title, is_active in menu_items:
+        self.sidebar_buttons = []
+        for icon, title in menu_items:
             btn_frame = tk.Frame(
                 sidebar,
-                bg=self.colors["sidebar_item"] if is_active else self.colors["sidebar_bg"],
-                highlightbackground=self.colors["sidebar_item"] if is_active else self.colors["sidebar_bg"],
+                bg=self.colors["sidebar_bg"],
+                highlightbackground=self.colors["sidebar_bg"],
                 highlightthickness=1,
                 cursor="hand2"
             )
@@ -105,8 +118,8 @@ class SteadypayAdminDashboard(tk.Tk):
                 btn_frame,
                 text=icon,
                 font=("Segoe UI", 11),
-                bg=btn_frame["bg"],
-                fg=self.colors["dark_teal"] if is_active else self.colors["deep_teal"]
+                bg=self.colors["sidebar_bg"],
+                fg=self.colors["deep_teal"]
             )
             icon_lbl.pack(side="left", padx=(10, 6), pady=6)
 
@@ -114,12 +127,15 @@ class SteadypayAdminDashboard(tk.Tk):
             title_lbl = tk.Label(
                 btn_frame,
                 text=title,
-                font=("Segoe UI", 9, "bold" if is_active else "normal"),
-                fg=self.colors["dark_teal"] if is_active else "#355B57",
-                bg=btn_frame["bg"],
+                font=("Segoe UI", 9),
+                fg="#355B57",
+                bg=self.colors["sidebar_bg"],
                 justify="left"
             )
             title_lbl.pack(side="left", pady=6)
+
+            # Store references for dynamic active state updates
+            self.sidebar_buttons.append((title, btn_frame, icon_lbl, title_lbl))
 
             # Bind click
             for widget in (btn_frame, icon_lbl, title_lbl):
@@ -156,9 +172,103 @@ class SteadypayAdminDashboard(tk.Tk):
         for widget in (logout_frame, logout_icon, logout_lbl):
             widget.bind("<Button-1>", lambda e: self.handle_logout())
 
+    def update_sidebar_active(self, active_menu_title):
+        """Updates the visual active/inactive state of all sidebar menu items."""
+        for title, btn_frame, icon_lbl, title_lbl in self.sidebar_buttons:
+            is_active = (title == active_menu_title)
+            bg = self.colors["sidebar_item"] if is_active else self.colors["sidebar_bg"]
+            btn_frame.configure(bg=bg, highlightbackground=bg)
+            icon_lbl.configure(
+                bg=bg,
+                fg=self.colors["dark_teal"] if is_active else self.colors["deep_teal"]
+            )
+            title_lbl.configure(
+                bg=bg,
+                font=("Segoe UI", 9, "bold" if is_active else "normal"),
+                fg=self.colors["dark_teal"] if is_active else "#355B57"
+            )
+
     def on_menu_click(self, menu_name):
-        # Redirection links in menu bar kept empty for now as requested
-        pass
+        """Handles sidebar menu item clicks by switching to the corresponding page."""
+        menu_to_page = {
+            "Employee\nmanagement": "employee",
+            "Process payroll": "process_pay",
+            "Payroll records": "pay_records",
+            "Generate payslips": "payslips",
+            "Settings": "settings"
+        }
+        page = menu_to_page.get(menu_name)
+        if page:
+            self.show_page(page)
+
+    # ==========================================
+    # PAGE SWITCHING (SMOOTH IN-PLACE NAVIGATION)
+    # ==========================================
+    def show_page(self, page_name):
+        """Switches the right-side content to the specified page instantly,
+        without closing or reopening the window."""
+        if page_name == self.current_page:
+            return
+        self.current_page = page_name
+
+        # Clear all existing content widgets
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+
+        # Scroll back to top
+        self.main_canvas.yview_moveto(0)
+
+        # Page configuration: (badge_text, description, active_sidebar_menu_title)
+        page_config = {
+            "dashboard": (
+                "PAYROLL DASHBOARD",
+                "Manage employees, payroll runs, and records from one secure workspace.",
+                "Employee\nmanagement"
+            ),
+            "employee": (
+                "EMPLOYEE MANAGEMENT",
+                "View and manage all employee records and profiles.",
+                "Employee\nmanagement"
+            ),
+            "process_pay": (
+                "PROCESS PAYROLL",
+                "Run and manage payroll processing cycles.",
+                "Process payroll"
+            ),
+            "pay_records": (
+                "PAYROLL RECORDS",
+                "Review past payroll runs and historical records.",
+                "Payroll records"
+            ),
+            "payslips": (
+                "GENERATE PAYSLIPS",
+                "Generate and export employee payslip documents.",
+                "Generate payslips"
+            ),
+            "settings": (
+                "SETTINGS",
+                "Configure system preferences and account settings.",
+                "Settings"
+            )
+        }
+
+        badge_text, desc_text, active_menu = page_config[page_name]
+
+        # Update sidebar highlight
+        self.update_sidebar_active(active_menu)
+
+        # Update window title
+        self.title(f"Steadypay - {badge_text.title()} (Admin)")
+
+        # Build the header (shared across all pages)
+        self.create_top_header(self.content_frame, badge_text, desc_text)
+
+        # Build page-specific content below the header
+        if page_name == "dashboard":
+            self.create_quick_actions(self.content_frame)
+            self.create_summary_cards(self.content_frame)
+            self.create_activity_table(self.content_frame)
+        # Other pages: right side is empty for now as requested
 
     # ==========================================
     # SCROLLABLE MAIN CONTENT AREA
@@ -194,13 +304,7 @@ class SteadypayAdminDashboard(tk.Tk):
 
         self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # Build Page Sections
-        self.create_top_header(self.content_frame)
-        self.create_quick_actions(self.content_frame)
-        self.create_summary_cards(self.content_frame)
-        self.create_activity_table(self.content_frame)
-
-    def create_top_header(self, parent):
+    def create_top_header(self, parent, badge_text="PAYROLL DASHBOARD", desc_text="Manage employees, payroll runs, and records from one secure workspace."):
         header_frame = tk.Frame(parent, bg=self.colors["white"])
         header_frame.pack(fill="x", pady=(0, 16))
 
@@ -210,7 +314,7 @@ class SteadypayAdminDashboard(tk.Tk):
 
         badge_sub = tk.Label(
             left_box,
-            text="PAYROLL DASHBOARD",
+            text=badge_text,
             font=("Segoe UI", 8, "bold"),
             fg=self.colors["primary_orange"],
             bg=self.colors["white"]
@@ -228,7 +332,7 @@ class SteadypayAdminDashboard(tk.Tk):
 
         desc = tk.Label(
             left_box,
-            text="Manage employees, payroll runs, and records from one secure workspace.",
+            text=desc_text,
             font=("Segoe UI", 9),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]

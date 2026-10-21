@@ -9,7 +9,7 @@ class SteadypayLoginPage(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("Steadypay - Login")
+        self.title("Steadypay")
         self.geometry("1000x650")
         self.resizable(False, False)
 
