@@ -95,6 +95,7 @@ class SteadypayAdminDashboard(tk.Tk):
 
         # Navigation Menu List (active state is set dynamically by show_page)
         menu_items = [
+            ("🏠", "Dashboard"),
             ("👥", "Employee\nmanagement"),
             ("💳", "Process payroll"),
             ("📄", "Payroll records"),
@@ -191,6 +192,7 @@ class SteadypayAdminDashboard(tk.Tk):
     def on_menu_click(self, menu_name):
         """Handles sidebar menu item clicks by switching to the corresponding page."""
         menu_to_page = {
+            "Dashboard": "dashboard",
             "Employee\nmanagement": "employee",
             "Process payroll": "process_pay",
             "Payroll records": "pay_records",
@@ -223,7 +225,7 @@ class SteadypayAdminDashboard(tk.Tk):
             "dashboard": (
                 "PAYROLL DASHBOARD",
                 "Manage employees, payroll runs, and records from one secure workspace.",
-                "Employee\nmanagement"
+                "Dashboard"
             ),
             "employee": (
                 "EMPLOYEE MANAGEMENT",
@@ -260,8 +262,9 @@ class SteadypayAdminDashboard(tk.Tk):
         # Update window title
         self.title(f"Steadypay - {badge_text.title()} (Admin)")
 
-        # Build the header (shared across all pages)
-        self.create_top_header(self.content_frame, badge_text, desc_text)
+        # Update the fixed header labels in-place (header lives outside the canvas)
+        self.badge_lbl.config(text=badge_text)
+        self.desc_lbl.config(text=desc_text)
 
         # Build page-specific content below the header
         if page_name == "dashboard":
@@ -276,6 +279,9 @@ class SteadypayAdminDashboard(tk.Tk):
     def create_scrollable_main_content(self):
         right_container = tk.Frame(self, bg=self.colors["white"])
         right_container.pack(side="right", fill="both", expand=True)
+
+        # Fixed header — lives outside the canvas so it never scrolls
+        self.create_top_header(right_container)
 
         self.main_canvas = tk.Canvas(right_container, bg=self.colors["white"], highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(right_container, orient="vertical", command=self.main_canvas.yview)
@@ -305,21 +311,24 @@ class SteadypayAdminDashboard(tk.Tk):
         self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def create_top_header(self, parent, badge_text="PAYROLL DASHBOARD", desc_text="Manage employees, payroll runs, and records from one secure workspace."):
-        header_frame = tk.Frame(parent, bg=self.colors["white"])
-        header_frame.pack(fill="x", pady=(0, 16))
+        header_frame = tk.Frame(parent, bg=self.colors["white"], padx=26, pady=20)
+        header_frame.pack(fill="x")
+
+        # Subtle bottom divider line
+        tk.Frame(parent, bg=self.colors["border_light"], height=1).pack(fill="x")
 
         # Left Header Titles
         left_box = tk.Frame(header_frame, bg=self.colors["white"])
         left_box.pack(side="left", anchor="w")
 
-        badge_sub = tk.Label(
+        self.badge_lbl = tk.Label(
             left_box,
             text=badge_text,
             font=("Segoe UI", 8, "bold"),
             fg=self.colors["primary_orange"],
             bg=self.colors["white"]
         )
-        badge_sub.pack(anchor="w")
+        self.badge_lbl.pack(anchor="w")
 
         title = tk.Label(
             left_box,
@@ -330,14 +339,14 @@ class SteadypayAdminDashboard(tk.Tk):
         )
         title.pack(anchor="w", pady=(2, 2))
 
-        desc = tk.Label(
+        self.desc_lbl = tk.Label(
             left_box,
             text=desc_text,
             font=("Segoe UI", 9),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
         )
-        desc.pack(anchor="w")
+        self.desc_lbl.pack(anchor="w")
 
         # Right Header (Date/Time & Profile Bubble Button)
         right_box = tk.Frame(header_frame, bg=self.colors["white"])

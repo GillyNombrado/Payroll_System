@@ -83,6 +83,7 @@ class SteadypaySettingsPage(tk.Tk):
 
         # Navigation Menu List
         menu_items = [
+            ("🏠", "Dashboard", False),
             ("👥", "Employee\nmanagement", False),
             ("💳", "Process payroll", False),
             ("📄", "Payroll records", False),
@@ -157,6 +158,10 @@ class SteadypaySettingsPage(tk.Tk):
             widget.bind("<Button-1>", lambda e: self.handle_logout())
 
     def on_menu_click(self, menu_name):
+        # Handle Dashboard tab directly
+        if menu_name == "Dashboard":
+            self.navigate_to_dashboard()
+            return
         # Map menu names to their corresponding script files
         menu_map = {
             "Employee\nmanagement": "aEmployee.py",
@@ -181,6 +186,9 @@ class SteadypaySettingsPage(tk.Tk):
     def create_scrollable_main_content(self):
         right_container = tk.Frame(self, bg=self.colors["white"])
         right_container.pack(side="right", fill="both", expand=True)
+
+        # Fixed header — lives outside the canvas so it never scrolls
+        self.create_top_header(right_container)
 
         self.main_canvas = tk.Canvas(right_container, bg=self.colors["white"], highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(right_container, orient="vertical", command=self.main_canvas.yview)
@@ -209,12 +217,14 @@ class SteadypaySettingsPage(tk.Tk):
 
         self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # Build Page Sections
-        self.create_top_header(self.content_frame)
+        # Scrollable page content lives in content_frame (header is fixed above)
 
     def create_top_header(self, parent):
-        header_frame = tk.Frame(parent, bg=self.colors["white"])
-        header_frame.pack(fill="x", pady=(0, 16))
+        header_frame = tk.Frame(parent, bg=self.colors["white"], padx=26, pady=20)
+        header_frame.pack(fill="x")
+
+        # Subtle bottom divider line
+        tk.Frame(parent, bg=self.colors["border_light"], height=1).pack(fill="x")
 
         # Left Header Titles
         left_box = tk.Frame(header_frame, bg=self.colors["white"])
