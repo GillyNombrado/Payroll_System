@@ -190,18 +190,26 @@ class SteadypayAdminDashboard(tk.Tk):
             )
 
     def on_menu_click(self, menu_name):
-        """Handles sidebar menu item clicks by switching to the corresponding page."""
-        menu_to_page = {
-            "Dashboard": "dashboard",
-            "Employee\nmanagement": "employee",
-            "Process payroll": "process_pay",
-            "Payroll records": "pay_records",
-            "Generate payslips": "payslips",
-            "Settings": "settings"
+        """Handles sidebar menu item clicks.
+        Dashboard stays in-window; all other pages navigate to their own script."""
+        if menu_name == "Dashboard":
+            self.show_page("dashboard")
+            return
+
+        # Map non-dashboard items to their script files
+        menu_to_script = {
+            "Employee\nmanagement": "aEmployee.py",
+            "Process payroll":      "aProcessPay.py",
+            "Payroll records":      "aPayRecords.py",
+            "Generate payslips":    "aPayslips.py",
+            "Settings":             "aSettings.py"
         }
-        page = menu_to_page.get(menu_name)
-        if page:
-            self.show_page(page)
+        script = menu_to_script.get(menu_name)
+        if script:
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script)
+            if os.path.exists(script_path):
+                self.destroy()
+                subprocess.Popen([sys.executable, script_path])
 
     # ==========================================
     # PAGE SWITCHING (SMOOTH IN-PLACE NAVIGATION)

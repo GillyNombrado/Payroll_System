@@ -51,6 +51,10 @@ class SteadypayEmployeePage(tk.Tk):
             ("EMP-005", "David Chen", "QA Engineer", "Engineering", "$3,400.00", "Active"),
         ]
 
+        # Search state
+        self._search_placeholder = "Search employee..."
+        self.search_var = None   # initialised in create_employee_body
+
         self.setup_layout()
 
     def setup_layout(self):
@@ -340,7 +344,6 @@ class SteadypayEmployeePage(tk.Tk):
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self._on_search_change)
 
-        self._search_placeholder = "Search employee..."
         search_entry = tk.Entry(
             search_frame,
             font=("Segoe UI", 9),
@@ -645,8 +648,11 @@ class SteadypayEmployeePage(tk.Tk):
             self.tree.insert("", "end", values=emp, tags=(tag,))
 
     def _on_search_change(self, *args):
+        if self.search_var is None:
+            return
         query = self.search_var.get()
-        if query == self._search_placeholder:
+        placeholder = getattr(self, "_search_placeholder", "")
+        if query == placeholder:
             query = ""
         self.load_table_data(filter_text=query)
 
