@@ -98,8 +98,7 @@ class SteadypayAdminDashboard(tk.Tk):
             ("🏠", "Dashboard"),
             ("👥", "Employee\nmanagement"),
             ("💳", "Process payroll"),
-            ("📄", "Payroll records"),
-            ("📑", "Generate payslips"),
+            ("📄", "Payroll &\nPayslips"),
             ("⚙️", "Settings")
         ]
 
@@ -200,8 +199,7 @@ class SteadypayAdminDashboard(tk.Tk):
         menu_to_script = {
             "Employee\nmanagement": "aEmployee.py",
             "Process payroll":      "aProcessPay.py",
-            "Payroll records":      "aPayRecords.py",
-            "Generate payslips":    "aPayslips.py",
+            "Payroll &\nPayslips":  "aPayRecord&Slip.py",
             "Settings":             "aSettings.py"
         }
         script = menu_to_script.get(menu_name)
@@ -245,15 +243,10 @@ class SteadypayAdminDashboard(tk.Tk):
                 "Run and manage payroll processing cycles.",
                 "Process payroll"
             ),
-            "pay_records": (
-                "PAYROLL RECORDS",
-                "Review past payroll runs and historical records.",
-                "Payroll records"
-            ),
-            "payslips": (
-                "GENERATE PAYSLIPS",
-                "Generate and export employee payslip documents.",
-                "Generate payslips"
+            "pay_records_slips": (
+                "PAYROLL & PAYSLIPS",
+                "Review payroll records and generate employee payslips.",
+                "Payroll &\nPayslips"
             ),
             "settings": (
                 "SETTINGS",
@@ -276,9 +269,8 @@ class SteadypayAdminDashboard(tk.Tk):
 
         # Build page-specific content below the header
         if page_name == "dashboard":
-            self.create_quick_actions(self.content_frame)
             self.create_summary_cards(self.content_frame)
-            self.create_activity_table(self.content_frame)
+            self.create_split_layout(self.content_frame)
         # Other pages: right side is empty for now as requested
 
     # ==========================================
@@ -340,7 +332,7 @@ class SteadypayAdminDashboard(tk.Tk):
 
         title = tk.Label(
             left_box,
-            text="Name of Company",
+            text=self.admin_data.get("company_name", "Steadypay Technologies Inc."),
             font=("Segoe UI", 20, "bold"),
             fg=self.colors["dark_teal"],
             bg=self.colors["white"]
@@ -415,112 +407,496 @@ class SteadypayAdminDashboard(tk.Tk):
             w.bind("<Button-1>", lambda e: self.show_admin_profile_bubble())
 
     # ==========================================
-    # QUICK ACTION BUTTONS & SEARCH ROW
+    # VISUAL CHARTS & PROGRESS BARS HELPERS
     # ==========================================
-    def create_quick_actions(self, parent):
-        actions_row = tk.Frame(parent, bg=self.colors["white"])
-        actions_row.pack(fill="x", pady=(0, 16))
+    def draw_progress_bar(self, parent, percentage=78, fg_color=None, bg_color=None, height=6):
+        """Draws a sleek, rounded horizontal progress bar."""
+        fg = fg_color or self.colors["dark_teal"]
+        bg = bg_color or self.colors["border_light"]
+        c = tk.Canvas(parent, height=height, bg=self.colors["white"], highlightthickness=0)
+        c.pack(fill="x", pady=(4, 2))
 
-        # 1. Run Payroll (Orange CTA Card)
-        run_card = tk.Frame(
-            actions_row,
-            bg=self.colors["primary_orange"],
-            cursor="hand2",
+        def _render(event=None):
+            w = c.winfo_width()
+            h = c.winfo_height()
+            if w <= 4:
+                return
+            c.delete("all")
+            draw_rounded_rectangle(c, 0, 0, w, h, radius=max(2, h // 2), fill=bg, outline="")
+            pw = max(h, int(w * (percentage / 100.0)))
+            draw_rounded_rectangle(c, 0, 0, min(w, pw), h, radius=max(2, h // 2), fill=fg, outline="")
+
+        c.bind("<Configure>", _render)
+        return c
+
+    def create_trend_line_chart_widget(self, parent):
+        """Draws a responsive Payroll Expense Trend line chart with spline curve and month data."""
+        c = tk.Canvas(parent, height=52, bg=self.colors["white"], highlightthickness=0)
+        c.pack(fill="x", pady=(4, 0))
+
+        def _render(event=None):
+            w = c.winfo_width()
+            h = c.winfo_height()
+            if w <= 10 or h <= 10:
+                return
+            c.delete("all")
+
+            # Reference grid line
+            c.create_line(8, h - 16, w - 8, h - 16, fill="#F0F5F4", width=1)
+
+            # Historical trend points: May ($22.1k), Jun ($23.8k), Jul ($24.9k), Aug ($25.4k), Sep ($27.35k)
+            values = [0.22, 0.44, 0.40, 0.68, 0.94]
+            months = ["May", "Jun", "Jul", "Aug", "Sep"]
+            pts = []
+            step = (w - 24) / (len(values) - 1)
+            for i, v in enumerate(values):
+                px = 12 + i * step
+                py = (h - 20) - (v * (h - 26))
+                pts.append((px, py))
+
+            # Draw smooth trend spline line
+            flat_pts = []
+            for px, py in pts:
+                flat_pts.extend([px, py])
+            c.create_line(flat_pts, fill=self.colors["primary_orange"], width=2.5, smooth=True)
+
+            # Draw nodes and month labels
+            for i, (px, py) in enumerate(pts):
+                is_last = (i == len(pts) - 1)
+                r = 3.5 if is_last else 2
+                fill_col = self.colors["primary_orange"] if is_last else self.colors["soft_orange"]
+                c.create_oval(px - r, py - r, px + r, py + r, fill=fill_col, outline=self.colors["white"], width=1)
+                c.create_text(
+                    px, h - 7,
+                    text=months[i],
+                    fill=self.colors["deep_teal"] if is_last else self.colors["gray_text"],
+                    font=("Segoe UI", 6, "bold" if is_last else "normal")
+                )
+
+        c.bind("<Configure>", _render)
+        return c
+
+    def create_donut_chart_widget(self, parent):
+        """Draws a Department Budget Allocation donut chart with an integrated micro-legend."""
+        c = tk.Canvas(parent, height=52, bg=self.colors["white"], highlightthickness=0)
+        c.pack(fill="x", pady=(4, 0))
+
+        def _render(event=None):
+            w = c.winfo_width()
+            h = c.winfo_height()
+            if w <= 10 or h <= 10:
+                return
+            c.delete("all")
+
+            # Left side: Donut ring
+            cx = 28
+            cy = h // 2
+            r_out = 22
+            r_in = 12
+
+            # Budget slices: (percentage, color)
+            slices = [
+                (35, self.colors["dark_teal"]),     # Engineering & Design
+                (25, self.colors["primary_orange"]), # Operations
+                (20, self.colors["soft_orange"]),    # Finance
+                (20, self.colors["avatar_mint"])     # People & HR
+            ]
+
+            start_angle = 90
+            for pct, col in slices:
+                extent = -1 * (pct / 100.0) * 360
+                c.create_arc(
+                    cx - r_out, cy - r_out, cx + r_out, cy + r_out,
+                    start=start_angle, extent=extent, fill=col, outline=""
+                )
+                start_angle += extent
+
+            # Center hole cutout
+            c.create_oval(cx - r_in, cy - r_in, cx + r_in, cy + r_in, fill=self.colors["white"], outline="")
+            c.create_text(cx, cy, text="5 Dept", fill=self.colors["deep_teal"], font=("Segoe UI", 6, "bold"))
+
+            # Right side: Micro-legend
+            legend_items = [
+                ("35% Design", self.colors["dark_teal"]),
+                ("25% Ops", self.colors["primary_orange"]),
+                ("20% Finance", self.colors["soft_orange"]),
+                ("20% People", self.colors["avatar_mint"])
+            ]
+
+            lx = 58
+            for idx, (label, col) in enumerate(legend_items):
+                ly = 8 + (idx * 11)
+                c.create_rectangle(lx, ly - 3, lx + 5, ly + 3, fill=col, outline="")
+                c.create_text(lx + 9, ly, text=label, anchor="w", fill=self.colors["text_dark"], font=("Segoe UI", 6))
+
+        c.bind("<Configure>", _render)
+        return c
+
+    # ==========================================
+    # COMPUTATION FUNCTION & SUMMARY CARDS
+    # ==========================================
+    def compute_summary_metrics(self):
+        """Computes summary figures dynamically based on employee dataset."""
+        return compute_payroll_summary()
+
+    def create_summary_cards(self, parent):
+        """Renders the top stat cards: 2 standard stat boxes with progress bars + 2 visual chart widgets."""
+        self.summary_frame = tk.Frame(parent, bg=self.colors["white"])
+        self.summary_frame.pack(fill="x", pady=(0, 16))
+
+        metrics = self.compute_summary_metrics()
+
+        for col_idx in range(4):
+            self.summary_frame.columnconfigure(col_idx, weight=1)
+
+        # -------------------------------------------------------------
+        # Box 1: Total Payroll (Standard Stat Box + Progress Bar)
+        # -------------------------------------------------------------
+        card1 = tk.Frame(
+            self.summary_frame,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
             padx=14,
-            pady=8
+            pady=10
         )
-        run_card.pack(side="left", padx=(0, 10))
+        card1.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
-        run_icon = tk.Label(run_card, text="💳", font=("Segoe UI", 12), bg=self.colors["primary_orange"], fg="#FFFFFF")
-        run_icon.pack(side="left", padx=(0, 8))
+        tk.Label(card1, text="TOTAL PAYROLL", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(card1, text=metrics["total_payroll"], font=("Segoe UI", 15, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 1))
+        tk.Label(card1, text="September 2026 payroll cycle", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
 
-        run_txt = tk.Frame(run_card, bg=self.colors["primary_orange"])
+        self.draw_progress_bar(card1, percentage=78, fg_color=self.colors["dark_teal"], height=5)
+        prog_info1 = tk.Frame(card1, bg=self.colors["white"])
+        prog_info1.pack(fill="x")
+        tk.Label(prog_info1, text="Cap utilized: 78%", font=("Segoe UI", 6, "bold"), fg=self.colors["deep_teal"], bg=self.colors["white"]).pack(side="left")
+        tk.Label(prog_info1, text="Limit $35k", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="right")
+
+        # -------------------------------------------------------------
+        # Box 2: Visual Widget - Payroll Expense Trend Line Chart
+        # -------------------------------------------------------------
+        card2 = tk.Frame(
+            self.summary_frame,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=14,
+            pady=10
+        )
+        card2.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
+
+        hdr2 = tk.Frame(card2, bg=self.colors["white"])
+        hdr2.pack(fill="x")
+        tk.Label(hdr2, text="PAYROLL TREND", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="left")
+
+        trend_pill = tk.Label(hdr2, text="+8.4% ▲", font=("Segoe UI", 6, "bold"), bg=self.colors["pill_approved"], fg=self.colors["pill_approved_text"], padx=4, pady=1)
+        trend_pill.pack(side="right")
+
+        tk.Label(card2, text="5-Mo Expense Trajectory", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 0))
+        self.create_trend_line_chart_widget(card2)
+
+        # -------------------------------------------------------------
+        # Box 3: Visual Widget - Department Budget Allocation Donut Chart
+        # -------------------------------------------------------------
+        card3 = tk.Frame(
+            self.summary_frame,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=14,
+            pady=10
+        )
+        card3.grid(row=0, column=2, sticky="nsew", padx=(0, 8))
+
+        hdr3 = tk.Frame(card3, bg=self.colors["white"])
+        hdr3.pack(fill="x")
+        tk.Label(hdr3, text="DEPT ALLOCATION", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="left")
+        tk.Label(hdr3, text="5 Depts", font=("Segoe UI", 6, "bold"), bg=self.colors["pill_pending"], fg=self.colors["pill_pending_text"], padx=4, pady=1).pack(side="right")
+
+        tk.Label(card3, text="Budget share by team", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 0))
+        self.create_donut_chart_widget(card3)
+
+        # -------------------------------------------------------------
+        # Box 4: Cycle Readiness & Verification (Standard Stat Box + Progress Bar)
+        # -------------------------------------------------------------
+        card4 = tk.Frame(
+            self.summary_frame,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=14,
+            pady=10
+        )
+        card4.grid(row=0, column=3, sticky="nsew")
+
+        tk.Label(card4, text="CYCLE READINESS", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(card4, text=metrics["next_payday"], font=("Segoe UI", 15, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 1))
+        tk.Label(card4, text="3 days until final approval", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+
+        self.draw_progress_bar(card4, percentage=100, fg_color=self.colors["primary_orange"], height=5)
+        prog_info4 = tk.Frame(card4, bg=self.colors["white"])
+        prog_info4.pack(fill="x")
+        tk.Label(prog_info4, text="5 / 5 verified • 100% ready", font=("Segoe UI", 6, "bold"), fg=self.colors["primary_orange"], bg=self.colors["white"]).pack(side="left")
+        tk.Label(prog_info4, text="EFT Queued", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="right")
+
+    # ==========================================
+    # SPLIT LAYOUT (CARDS + ACTIVITY FEED)
+    # ==========================================
+    def create_split_layout(self, parent):
+        """Creates the two-column Split Layout: Informational Cards on the left, Activity Feed on the right."""
+        split_frame = tk.Frame(parent, bg=self.colors["white"])
+        split_frame.pack(fill="both", expand=True)
+
+        split_frame.columnconfigure(0, weight=4, minsize=320)
+        split_frame.columnconfigure(1, weight=6, minsize=480)
+        split_frame.rowconfigure(0, weight=1)
+
+        # Left Column: Modular Cards
+        left_cards_col = tk.Frame(split_frame, bg=self.colors["white"])
+        left_cards_col.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+
+        self.create_quick_actions_card(left_cards_col)
+        self.create_dept_spending_card(left_cards_col)
+        self.create_compliance_card(left_cards_col)
+
+        # Right Column: Activity Feed Panel (NO TABLE HEADERS)
+        right_feed_col = tk.Frame(split_frame, bg=self.colors["white"])
+        right_feed_col.grid(row=0, column=1, sticky="nsew")
+
+        self.create_activity_feed_panel(right_feed_col)
+
+    # ==========================================
+    # LEFT COLUMN CARDS
+    # ==========================================
+    def navigate_to_script(self, script_name):
+        """Helper to navigate to target script file."""
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_name)
+        if os.path.exists(script_path):
+            self.destroy()
+            subprocess.Popen([sys.executable, script_path])
+
+    def create_quick_actions_card(self, parent):
+        """Quick action navigation hub card."""
+        card = tk.Frame(
+            parent,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=14,
+            pady=12
+        )
+        card.pack(fill="x", pady=(0, 12))
+
+        tk.Label(card, text="QUICK ACTIONS", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(card, text="Payroll Operations Hub", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 8))
+
+        # 1. Run Payroll Button
+        run_btn = tk.Frame(card, bg=self.colors["primary_orange"], cursor="hand2", padx=12, pady=7)
+        run_btn.pack(fill="x", pady=(0, 6))
+        tk.Label(run_btn, text="💳", font=("Segoe UI", 11), bg=self.colors["primary_orange"], fg="#FFFFFF").pack(side="left", padx=(0, 8))
+        run_txt = tk.Frame(run_btn, bg=self.colors["primary_orange"])
         run_txt.pack(side="left")
-        tk.Label(run_txt, text="Run payroll", font=("Segoe UI", 9, "bold"), fg="#FFFFFF", bg=self.colors["primary_orange"]).pack(anchor="w")
-        tk.Label(run_txt, text="Process the next cycle", font=("Segoe UI", 7), fg="#FFE8D0", bg=self.colors["primary_orange"]).pack(anchor="w")
+        tk.Label(run_txt, text="Run Payroll Cycle", font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg=self.colors["primary_orange"]).pack(anchor="w")
+        tk.Label(run_txt, text="Compute & disburse next period", font=("Segoe UI", 6), fg="#FFE8D0", bg=self.colors["primary_orange"]).pack(anchor="w")
 
-        # 2. Export Data (White bordered card)
-        export_card = tk.Frame(
-            actions_row,
-            bg=self.colors["white"],
-            highlightbackground=self.colors["border_peach"],
-            highlightthickness=1,
-            cursor="hand2",
-            padx=14,
-            pady=8
-        )
-        export_card.pack(side="left", padx=(0, 10))
+        # 2. Payroll & Payslips Button
+        slip_btn = tk.Frame(card, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1, cursor="hand2", padx=12, pady=7)
+        slip_btn.pack(fill="x", pady=(0, 6))
+        tk.Label(slip_btn, text="📄", font=("Segoe UI", 11), bg=self.colors["white"], fg=self.colors["dark_teal"]).pack(side="left", padx=(0, 8))
+        slip_txt = tk.Frame(slip_btn, bg=self.colors["white"])
+        slip_txt.pack(side="left")
+        tk.Label(slip_txt, text="Payroll & Payslips", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(slip_txt, text="Master ledger, tax slips & NACHA export", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
 
-        exp_icon = tk.Label(export_card, text="📥", font=("Segoe UI", 11), bg=self.colors["white"], fg=self.colors["dark_teal"])
-        exp_icon.pack(side="left", padx=(0, 8))
-
-        exp_txt = tk.Frame(export_card, bg=self.colors["white"])
-        exp_txt.pack(side="left")
-        tk.Label(exp_txt, text="Export data", font=("Segoe UI", 9, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w")
-        tk.Label(exp_txt, text="CSV, PDF, or payroll files", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
-
-        # 3. Add Employee (White bordered card)
-        add_card = tk.Frame(
-            actions_row,
-            bg=self.colors["white"],
-            highlightbackground=self.colors["border_peach"],
-            highlightthickness=1,
-            cursor="hand2",
-            padx=14,
-            pady=8
-        )
-        add_card.pack(side="left", padx=(0, 10))
-
-        add_icon = tk.Label(add_card, text="👤➕", font=("Segoe UI", 10), bg=self.colors["white"], fg=self.colors["dark_teal"])
-        add_icon.pack(side="left", padx=(0, 8))
-
-        add_txt = tk.Frame(add_card, bg=self.colors["white"])
+        # 3. Add Employee Button
+        add_btn = tk.Frame(card, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1, cursor="hand2", padx=12, pady=7)
+        add_btn.pack(fill="x")
+        tk.Label(add_btn, text="👤➕", font=("Segoe UI", 10), bg=self.colors["white"], fg=self.colors["dark_teal"]).pack(side="left", padx=(0, 8))
+        add_txt = tk.Frame(add_btn, bg=self.colors["white"])
         add_txt.pack(side="left")
-        tk.Label(add_txt, text="Add employee", font=("Segoe UI", 9, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w")
-        tk.Label(add_txt, text="Invite a new team member", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(add_txt, text="Add Employee", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(add_txt, text="Register team member & salary details", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
 
-        # 4. Search Bar
-        search_card = tk.Frame(
-            actions_row,
+        # Binds
+        for w in (run_btn, run_txt) + tuple(run_btn.winfo_children()) + tuple(run_txt.winfo_children()):
+            w.bind("<Button-1>", lambda e: self.navigate_to_script("aProcessPay.py"))
+        for w in (slip_btn, slip_txt) + tuple(slip_btn.winfo_children()) + tuple(slip_txt.winfo_children()):
+            w.bind("<Button-1>", lambda e: self.navigate_to_script("aPayRecord&Slip.py"))
+        for w in (add_btn, add_txt) + tuple(add_btn.winfo_children()) + tuple(add_txt.winfo_children()):
+            w.bind("<Button-1>", lambda e: self.navigate_to_script("aEmployee.py"))
+
+    def create_dept_spending_card(self, parent):
+        """Department budget allocation card with visual horizontal progress bars."""
+        card = tk.Frame(
+            parent,
             bg=self.colors["white"],
             highlightbackground=self.colors["border_peach"],
             highlightthickness=1,
-            padx=10,
-            pady=6
+            padx=14,
+            pady=12
         )
-        search_card.pack(side="right", fill="x", expand=True)
+        card.pack(fill="x", pady=(0, 12))
 
-        s_icon = tk.Label(search_card, text="🔍", font=("Segoe UI", 10), bg=self.colors["white"], fg=self.colors["gray_text"])
-        s_icon.pack(side="left", padx=(0, 6))
+        tk.Label(card, text="DEPARTMENT BUDGET", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(card, text="Spending & Cap Allocation", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 8))
+
+        dept_data = [
+            ("Engineering & Design", "$9,320 / $12,000", 78, self.colors["dark_teal"]),
+            ("Operations Team", "$5,140 / $6,500", 79, self.colors["primary_orange"]),
+            ("Finance & Accounts", "$4,960 / $6,000", 83, self.colors["soft_orange"]),
+            ("People Operations", "$4,780 / $5,800", 82, self.colors["avatar_mint"])
+        ]
+
+        for dept_name, spent_txt, pct, bar_col in dept_data:
+            item_frame = tk.Frame(card, bg=self.colors["white"])
+            item_frame.pack(fill="x", pady=2)
+
+            tk.Label(item_frame, text=dept_name, font=("Segoe UI", 7, "bold"), fg=self.colors["text_dark"], bg=self.colors["white"]).pack(side="left")
+            tk.Label(item_frame, text=f"{spent_txt} ({pct}%)", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="right")
+
+            self.draw_progress_bar(card, percentage=pct, fg_color=bar_col, height=4)
+
+    def create_compliance_card(self, parent):
+        """Compliance and payroll security card."""
+        card = tk.Frame(
+            parent,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=14,
+            pady=12
+        )
+        card.pack(fill="x")
+
+        tk.Label(card, text="PAYROLL HEALTH", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(card, text="Audit & Compliance Status", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 6))
+
+        checklist = [
+            ("Direct Deposit EFT", "100% Active", self.colors["pill_approved"], self.colors["pill_approved_text"]),
+            ("Statutory Tax Withholding", "IRS 2026 Compliant", self.colors["pill_approved"], self.colors["pill_approved_text"]),
+            ("Period Lock & Seal", "Locked to prevent edits", self.colors["pill_pending"], self.colors["pill_pending_text"])
+        ]
+
+        for label, status, bg_col, fg_col in checklist:
+            row = tk.Frame(card, bg=self.colors["white"])
+            row.pack(fill="x", pady=3)
+            tk.Label(row, text=f"✓ {label}", font=("Segoe UI", 7), fg=self.colors["text_dark"], bg=self.colors["white"]).pack(side="left")
+            badge = tk.Label(row, text=status, font=("Segoe UI", 6, "bold"), bg=bg_col, fg=fg_col, padx=4, pady=1)
+            badge.pack(side="right")
+
+    # ==========================================
+    # RIGHT COLUMN: ACTIVITY FEED (NO TABLE HEADERS)
+    # ==========================================
+    def create_activity_feed_panel(self, parent):
+        """Creates the Live Activity Feed panel with no table headers."""
+        self.table_card = tk.Frame(
+            parent,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=16,
+            pady=14
+        )
+        self.table_card.pack(fill="both", expand=True)
+
+        # Header Row of Feed: Title + Live Badge + Search
+        card_hdr = tk.Frame(self.table_card, bg=self.colors["white"])
+        card_hdr.pack(fill="x", pady=(0, 10))
+
+        left_hdr = tk.Frame(card_hdr, bg=self.colors["white"])
+        left_hdr.pack(side="left")
+
+        title_box = tk.Frame(left_hdr, bg=self.colors["white"])
+        title_box.pack(anchor="w")
+
+        tk.Label(
+            title_box,
+            text="Live Activity Feed",
+            font=("Segoe UI", 12, "bold"),
+            fg=self.colors["dark_teal"],
+            bg=self.colors["white"]
+        ).pack(side="left")
+
+        pulse = tk.Label(
+            title_box,
+            text="● Live Feed",
+            font=("Segoe UI", 7, "bold"),
+            fg=self.colors["primary_orange"],
+            bg=self.colors["pill_pending"],
+            padx=5,
+            pady=1
+        )
+        pulse.pack(side="left", padx=(8, 0))
+
+        tk.Label(
+            left_hdr,
+            text="Real-time employee payroll disbursements & status updates",
+            font=("Segoe UI", 7),
+            fg=self.colors["gray_text"],
+            bg=self.colors["white"]
+        ).pack(anchor="w", pady=(1, 0))
+
+        # Search Bar
+        search_card = tk.Frame(
+            card_hdr,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=8,
+            pady=4
+        )
+        search_card.pack(side="right")
+
+        tk.Label(search_card, text="🔍", font=("Segoe UI", 8), bg=self.colors["white"], fg=self.colors["gray_text"]).pack(side="left", padx=(0, 4))
 
         self.search_entry = tk.Entry(
             search_card,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 8),
             bg=self.colors["white"],
             fg=self.colors["text_dark"],
             bd=0,
-            relief="flat"
+            relief="flat",
+            width=18
         )
-        self.search_entry.insert(0, "Search employees, payslips, or payroll runs")
-        self.search_entry.pack(side="left", fill="x", expand=True, ipady=3)
+        self.search_entry.insert(0, "Filter activity...")
+        self.search_entry.pack(side="left", fill="x", expand=True, ipady=2)
 
         self.search_entry.bind("<FocusIn>", self.on_search_focus_in)
         self.search_entry.bind("<FocusOut>", self.on_search_focus_out)
         self.search_entry.bind("<KeyRelease>", self.on_search_key)
 
+        # Unified Activity Grid (NO TABLE HEADERS)
+        self.table_grid = tk.Frame(self.table_card, bg=self.colors["white"])
+        self.table_grid.pack(fill="both", expand=True, pady=(4, 0))
+
+        # Grid weights: [Avatar:1, Employee Info:4, Status:2, Amount:2, Time:1, Action:1]
+        self.col_specs = [
+            ("Avatar", 1, "center"),
+            ("Employee", 4, "w"),
+            ("Status", 2, "center"),
+            ("Amount", 2, "e"),
+            ("Updated", 1, "w"),
+            ("Action", 1, "center")
+        ]
+
+        for idx, (_, weight, _) in enumerate(self.col_specs):
+            self.table_grid.columnconfigure(idx, weight=weight)
+
+        self.render_table_rows()
+
     def on_search_focus_in(self, event):
-        if self.search_entry.get() == "Search employees, payslips, or payroll runs":
+        if self.search_entry.get() == "Filter activity...":
             self.search_entry.delete(0, tk.END)
             self.search_entry.config(fg=self.colors["text_dark"])
 
     def on_search_focus_out(self, event):
         if not self.search_entry.get().strip():
-            self.search_entry.insert(0, "Search employees, payslips, or payroll runs")
+            self.search_entry.insert(0, "Filter activity...")
             self.search_entry.config(fg=self.colors["gray_text"])
 
     def on_search_key(self, event):
         query = self.search_entry.get().strip().lower()
-        if query == "search employees, payslips, or payroll runs" or not query:
+        if query == "filter activity..." or not query:
             self.filtered_employees = list(self.employees)
         else:
             self.filtered_employees = [
@@ -533,152 +909,43 @@ class SteadypayAdminDashboard(tk.Tk):
             ]
         self.render_table_rows()
 
-    # ==========================================
-    # COMPUTATION FUNCTION & SUMMARY CARDS
-    # ==========================================
-    def compute_summary_metrics(self):
-        """Computes summary figures dynamically based on employee dataset."""
-        return compute_payroll_summary()
-
-    def create_summary_cards(self, parent):
-        self.summary_frame = tk.Frame(parent, bg=self.colors["white"])
-        self.summary_frame.pack(fill="x", pady=(0, 16))
-
-        metrics = self.compute_summary_metrics()
-
-        cards_spec = [
-            ("Total payroll", metrics["total_payroll"], "September 2026 payroll cycle"),
-            ("Active employees", metrics["active_employees"], "3 new hires this month"),
-            ("Pending payslips", metrics["pending_payslips"], "Ready for review and export"),
-            ("Next payday", metrics["next_payday"], "3 days until final approval")
-        ]
-
-        for i, (title, value, subtitle) in enumerate(cards_spec):
-            card = tk.Frame(
-                self.summary_frame,
-                bg=self.colors["white"],
-                highlightbackground=self.colors["border_peach"],
-                highlightthickness=1,
-                padx=16,
-                pady=10
-            )
-            card.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 10, 0))
-            self.summary_frame.columnconfigure(i, weight=1)
-
-            t_lbl = tk.Label(card, text=title, font=("Segoe UI", 8), fg=self.colors["gray_text"], bg=self.colors["white"])
-            t_lbl.pack(anchor="w")
-
-            v_lbl = tk.Label(card, text=value, font=("Segoe UI", 15, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"])
-            v_lbl.pack(anchor="w", pady=(2, 2))
-
-            s_lbl = tk.Label(card, text=subtitle, font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"])
-            s_lbl.pack(anchor="w")
-
-    # ==========================================
-    # RECENT ACTIVITY TABLE
-    # ==========================================
-    def create_activity_table(self, parent):
-        self.table_card = tk.Frame(
-            parent,
-            bg=self.colors["white"],
-            highlightbackground=self.colors["border_peach"],
-            highlightthickness=1,
-            padx=18,
-            pady=14
-        )
-        self.table_card.pack(fill="both", expand=True)
-
-        # Header Row of Card
-        card_hdr = tk.Frame(self.table_card, bg=self.colors["white"])
-        card_hdr.pack(fill="x", pady=(0, 10))
-
-        tbl_title = tk.Label(
-            card_hdr,
-            text="Recent activity",
-            font=("Segoe UI", 12, "bold"),
-            fg=self.colors["dark_teal"],
-            bg=self.colors["white"]
-        )
-        tbl_title.pack(side="left")
-
-        updated_lbl = tk.Label(
-            card_hdr,
-            text="Updated 2 minutes ago",
-            font=("Segoe UI", 8),
-            fg=self.colors["primary_orange"],
-            bg=self.colors["white"]
-        )
-        updated_lbl.pack(side="right")
-
-        # Table Column Specs: (Column Name, weight, alignment)
-        self.col_specs = [
-            ("Employee", 3, "w"),
-            ("Email", 3, "w"),
-            ("Payroll run", 2, "w"),
-            ("Status", 2, "w"),
-            ("Amount", 2, "e"),
-            ("Updated", 2, "w"),
-            ("Action", 1, "w")
-        ]
-
-        # Unified table grid frame to guarantee 100% column alignment
-        self.table_grid = tk.Frame(self.table_card, bg=self.colors["white"])
-        self.table_grid.pack(fill="both", expand=True)
-
-        for idx, (_, weight, _) in enumerate(self.col_specs):
-            self.table_grid.columnconfigure(idx, weight=weight)
-
-        self.render_table_rows()
-
     def render_table_rows(self):
-        # Clear existing widgets from grid
+        """Renders the Live Activity Feed stream rows WITHOUT table headers."""
         for child in self.table_grid.winfo_children():
             child.destroy()
 
-        # Row 0: Column Headers
-        for idx, (col_name, _, align) in enumerate(self.col_specs):
-            lbl = tk.Label(
-                self.table_grid,
-                text=col_name,
-                font=("Segoe UI", 8, "bold"),
-                fg=self.colors["gray_text"],
-                bg=self.colors["white"],
-                anchor=align
-            )
-            lbl.grid(row=0, column=idx, sticky="ew", padx=8, pady=(0, 6))
-
-        # Row 1: Divider line spanning all columns
-        div = tk.Frame(self.table_grid, height=1, bg=self.colors["border_light"])
-        div.grid(row=1, column=0, columnspan=len(self.col_specs), sticky="ew", pady=(0, 6))
+        # NOTE: TABLE HEADERS HAVE BEEN REMOVED AS REQUESTED.
+        # Feed items render directly starting at row 0.
 
         if not self.filtered_employees:
             no_data = tk.Label(
                 self.table_grid,
-                text="No employee records found matching your search.",
-                font=("Segoe UI", 9, "italic"),
+                text="No recent activity records found matching your filter.",
+                font=("Segoe UI", 8, "italic"),
                 fg=self.colors["gray_text"],
                 bg=self.colors["white"],
-                pady=20
+                pady=24
             )
-            no_data.grid(row=2, column=0, columnspan=len(self.col_specs), pady=20)
+            no_data.grid(row=0, column=0, columnspan=len(self.col_specs), pady=24)
             return
 
-        current_grid_row = 2
+        current_grid_row = 0
         for idx, emp in enumerate(self.filtered_employees):
-            # Col 0: Employee (Avatar Circle + Name + Role)
-            emp_box = tk.Frame(self.table_grid, bg=self.colors["white"])
-            emp_box.grid(row=current_grid_row, column=0, sticky="w", padx=8, pady=4)
+            # Row container with hover effect
+            row_frame = tk.Frame(self.table_grid, bg=self.colors["white"])
 
-            av_canvas = tk.Canvas(emp_box, width=30, height=30, bg=self.colors["white"], highlightthickness=0)
-            av_canvas.pack(side="left", padx=(0, 8))
-            av_canvas.create_oval(2, 2, 28, 28, fill=emp["avatar_color"], outline="")
-            av_canvas.create_text(15, 15, text=emp["initials"], fill="#FFFFFF", font=("Segoe UI", 8, "bold"))
+            # Col 0: Avatar Circle
+            av_canvas = tk.Canvas(self.table_grid, width=32, height=32, bg=self.colors["white"], highlightthickness=0)
+            av_canvas.grid(row=current_grid_row, column=0, padx=(4, 6), pady=6)
+            av_canvas.create_oval(2, 2, 30, 30, fill=emp["avatar_color"], outline="")
+            av_canvas.create_text(16, 16, text=emp["initials"], fill="#FFFFFF", font=("Segoe UI", 8, "bold"))
 
-            name_role_box = tk.Frame(emp_box, bg=self.colors["white"])
-            name_role_box.pack(side="left")
+            # Col 1: Employee Name & Event Action
+            emp_info = tk.Frame(self.table_grid, bg=self.colors["white"])
+            emp_info.grid(row=current_grid_row, column=1, sticky="w", padx=6, pady=6)
 
             name_lbl = tk.Label(
-                name_role_box,
+                emp_info,
                 text=emp["name"],
                 font=("Segoe UI", 9, "bold"),
                 fg=self.colors["dark_teal"],
@@ -688,39 +955,17 @@ class SteadypayAdminDashboard(tk.Tk):
             name_lbl.pack(anchor="w")
             name_lbl.bind("<Button-1>", lambda e, item=emp: self.show_employee_profile_bubble(item))
 
-            role_lbl = tk.Label(
-                name_role_box,
-                text=emp["role"],
+            sub_desc = tk.Label(
+                emp_info,
+                text=f"{emp['role']} • {emp['payroll_run']} cycle",
                 font=("Segoe UI", 7),
                 fg=self.colors["gray_text"],
                 bg=self.colors["white"]
             )
-            role_lbl.pack(anchor="w")
+            sub_desc.pack(anchor="w")
 
-            # Col 1: Email (Separate Column)
-            email_lbl = tk.Label(
-                self.table_grid,
-                text=emp["email"],
-                font=("Segoe UI", 8),
-                fg=self.colors["text_dark"],
-                bg=self.colors["white"],
-                anchor="w"
-            )
-            email_lbl.grid(row=current_grid_row, column=1, sticky="ew", padx=8, pady=4)
-
-            # Col 2: Payroll Run
-            run_lbl = tk.Label(
-                self.table_grid,
-                text=emp["payroll_run"],
-                font=("Segoe UI", 8),
-                fg=self.colors["gray_text"],
-                bg=self.colors["white"],
-                anchor="w"
-            )
-            run_lbl.grid(row=current_grid_row, column=2, sticky="ew", padx=8, pady=4)
-
-            # Col 3: Status Badge
-            is_approved = emp["status"] == "Approved"
+            # Col 2: Status Pill Badge (RoundedBadge)
+            is_approved = (emp["status"] == "Approved")
             status_bg = self.colors["pill_approved"] if is_approved else self.colors["pill_pending"]
             status_fg = self.colors["pill_approved_text"] if is_approved else self.colors["pill_pending_text"]
 
@@ -730,39 +975,49 @@ class SteadypayAdminDashboard(tk.Tk):
                 bg_color=status_bg,
                 fg_color=status_fg,
                 radius=8,
-                width=76,
+                width=72,
                 height=22,
                 parent_bg=self.colors["white"]
             )
-            status_pill.grid(row=current_grid_row, column=3, sticky="w", padx=8, pady=4)
+            status_pill.grid(row=current_grid_row, column=2, padx=6, pady=6)
 
-            # Col 4: Amount
+            # Col 3: Amount + Method Subtitle
+            amt_box = tk.Frame(self.table_grid, bg=self.colors["white"])
+            amt_box.grid(row=current_grid_row, column=3, sticky="e", padx=6, pady=6)
+
             amt_lbl = tk.Label(
-                self.table_grid,
+                amt_box,
                 text=f"${emp['amount']:,.2f}",
                 font=("Segoe UI", 9, "bold"),
                 fg=self.colors["dark_teal"],
-                bg=self.colors["white"],
-                anchor="e"
+                bg=self.colors["white"]
             )
-            amt_lbl.grid(row=current_grid_row, column=4, sticky="ew", padx=8, pady=4)
+            amt_lbl.pack(anchor="e")
 
-            # Col 5: Updated
+            method_lbl = tk.Label(
+                amt_box,
+                text="Direct Deposit",
+                font=("Segoe UI", 6),
+                fg=self.colors["gray_text"],
+                bg=self.colors["white"]
+            )
+            method_lbl.pack(anchor="e")
+
+            # Col 4: Updated Time
             upd_lbl = tk.Label(
                 self.table_grid,
                 text=emp["updated"],
-                font=("Segoe UI", 8),
+                font=("Segoe UI", 7),
                 fg=self.colors["gray_text"],
-                bg=self.colors["white"],
-                anchor="w"
+                bg=self.colors["white"]
             )
-            upd_lbl.grid(row=current_grid_row, column=5, sticky="ew", padx=8, pady=4)
+            upd_lbl.grid(row=current_grid_row, column=4, sticky="w", padx=6, pady=6)
 
-            # Col 6: View Action Button
+            # Col 5: View Action Button
             view_btn = tk.Button(
                 self.table_grid,
                 text="View",
-                font=("Segoe UI", 8, "bold"),
+                font=("Segoe UI", 7, "bold"),
                 bg=self.colors["white"],
                 fg=self.colors["primary_orange"],
                 activebackground=self.colors["border_peach"],
@@ -772,18 +1027,18 @@ class SteadypayAdminDashboard(tk.Tk):
                 bd=0,
                 relief="flat",
                 cursor="hand2",
-                padx=10,
+                padx=8,
                 pady=2,
                 command=lambda item=emp: self.show_employee_profile_bubble(item)
             )
-            view_btn.grid(row=current_grid_row, column=6, sticky="w", padx=8, pady=4)
+            view_btn.grid(row=current_grid_row, column=5, padx=6, pady=6)
 
             current_grid_row += 1
 
-            # Subtle row separator line
+            # Row separator line between stream items
             if idx < len(self.filtered_employees) - 1:
                 row_sep = tk.Frame(self.table_grid, height=1, bg="#F7F7F7")
-                row_sep.grid(row=current_grid_row, column=0, columnspan=len(self.col_specs), sticky="ew", pady=2)
+                row_sep.grid(row=current_grid_row, column=0, columnspan=len(self.col_specs), sticky="ew", pady=1)
                 current_grid_row += 1
 
     # ==========================================

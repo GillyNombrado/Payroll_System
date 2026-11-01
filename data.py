@@ -4,11 +4,23 @@ Contains all Admin, Employee, Account credentials, Payslips, and computation hel
 """
 
 # ==============================================================================
-# 1. ADMIN USER DATA
+# 1. ADMIN USER & COMPANY DATA
 # ==============================================================================
+COMPANY_DATA = {
+    "name": "Steadypay Technologies Inc.",
+    "legal_name": "Steadypay Technologies Inc.",
+    "ein": "12-3456789",
+    "address": "350 5th Avenue, Suite 4200, New York, NY 10118",
+    "currency": "USD ($) - US Dollar",
+    "pay_cycle": "Semi-Monthly (1st-15th & 16th-End)",
+    "payroll_email": "payroll@steadypay.com",
+    "phone": "+1 (555) 019-2830"
+}
+
 ADMIN_DATA = {
     "name": "Ava Morgan",
     "role": "Payroll Admin",
+    "company_name": "Steadypay Technologies Inc.",
     "email": "admin@gmail.com",
     "phone": "+1 (555) 234-5678",
     "age": 34,
@@ -189,6 +201,10 @@ def authenticate_user(email: str, password: str):
 def get_admin_data():
     """Returns the central admin profile dictionary."""
     return dict(ADMIN_DATA)
+
+def get_company_data():
+    """Returns company profile data."""
+    return dict(COMPANY_DATA)
 
 def get_all_employees():
     """Returns a list of all employee records."""
