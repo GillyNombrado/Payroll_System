@@ -6,16 +6,67 @@ import csv
 import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from data import get_admin_data, RoundedBadge, draw_rounded_rectangle
+from data import (
+    get_admin_data, RoundedBadge, draw_rounded_rectangle,
+    Role, get_current_user
+)
 
-class SteadypaySettingsPage(tk.Tk):
-    def __init__(self):
-        super().__init__()
+class ToolTip:
+    """Lightweight tooltip widget for displaying helpful role and status context."""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
 
-        self.title("Steadypay - Workspace & System Settings (Admin)")
-        self.geometry("1240x780")
-        self.minsize(1120, 680)
-        self.configure(bg="#FFFFFF")
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 20
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+            self.tip_window = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(
+                tw,
+                text=self.text,
+                justify="left",
+                background="#2C3E50",
+                foreground="#FFFFFF",
+                relief="flat",
+                font=("Segoe UI", 8),
+                padx=8,
+                pady=4
+            )
+            label.pack()
+        except Exception:
+            pass
+
+    def hide_tip(self, event=None):
+        if self.tip_window:
+            try:
+                self.tip_window.destroy()
+            except Exception:
+                pass
+            self.tip_window = None
+
+class SteadypaySettingsPage(tk.Frame):
+    def __init__(self, parent=None, controller=None):
+        if parent is None:
+            self.root = tk.Tk()
+            self.root.title("Steadypay - Workspace & System Settings (Admin)")
+            self.root.geometry("1240x780")
+            self.root.minsize(1120, 680)
+            self.root.configure(bg="#FFFFFF")
+            super().__init__(self.root, bg="#FFFFFF")
+            self.pack(fill="both", expand=True)
+            self.controller = controller
+        else:
+            self.root = parent.winfo_toplevel()
+            super().__init__(parent, bg="#FFFFFF")
+            self.controller = controller
 
         # Color Palette Definition (Based on Steadypay visual design)
         self.colors = {
@@ -44,9 +95,14 @@ class SteadypaySettingsPage(tk.Tk):
 
         # Centralized Admin Profile Data
         self.admin_data = get_admin_data()
+        self.user = get_current_user()
 
         # Active Settings Tab ("company", "tax", "rules", "security", "backup")
         self.active_tab = "company"
+
+        # View toggle states for Statutory Taxes and Payroll Parameters
+        self.tax_view_visible = False
+        self.rules_view_visible = False
 
         # Settings Configuration State
         self.company_config = {
@@ -61,13 +117,12 @@ class SteadypaySettingsPage(tk.Tk):
         }
 
         self.tax_config = {
-            "fed_income_tax": 10.5,
-            "state_tax": 4.5,
-            "fica_ss_rate": 6.2,
-            "fica_ss_cap": 168600.00,
-            "fica_medicare_rate": 1.45,
-            "futa_rate": 0.6,
-            "tax_year": "2026 IRS Publication 15 (Circular E)"
+            "bir_withholding_tax": 10.0,
+            "sss_rate": 4.5,
+            "sss_max_msc": 30000.00,
+            "philhealth_rate": 2.5,
+            "pagibig_rate": 2.0,
+            "tax_year": "BIR TRAIN Law (RA 10963) / RR No. 11-2018"
         }
 
         self.payroll_rules = {
@@ -96,12 +151,12 @@ class SteadypaySettingsPage(tk.Tk):
         ]
 
         self.audit_logs = [
-            {"timestamp": "Nov 01, 2026 - 09:15 AM", "user": "Ava Morgan", "event": "Finalized Sep 2026 Payroll Cycle", "terminal": "Terminal NY-01", "status": "Success"},
-            {"timestamp": "Nov 01, 2026 - 09:10 AM", "user": "Ava Morgan", "event": "Generated NACHA ACH Bank Batch File", "terminal": "Terminal NY-01", "status": "Success"},
-            {"timestamp": "Nov 01, 2026 - 08:45 AM", "user": "Ava Morgan", "event": "Updated Master Record: EMP-002 (Alex Smith)", "terminal": "Terminal NY-01", "status": "Success"},
-            {"timestamp": "Oct 31, 2026 - 05:30 PM", "user": "Marcus Sterling", "event": "Recalculated Tax Table 2026 Guidelines", "terminal": "Terminal NY-02", "status": "Success"},
-            {"timestamp": "Oct 31, 2026 - 02:15 PM", "user": "Chloe Bennet", "event": "Exported Compliance Vault Report (PDF)", "terminal": "Terminal NY-03", "status": "Success"},
-            {"timestamp": "Oct 30, 2026 - 11:00 AM", "user": "Ava Morgan", "event": "Created Automated Cloud Backup Snapshot", "terminal": "Automated Cron", "status": "Success"}
+            {"timestamp": "Nov 01, 2026 - 09:15 AM", "user": "Ava Morgan", "event": "Finalized Sep 2026 Payroll Cycle", "terminal": "Terminal NY-01", "status": "Success", "visibility": "super_admin"},
+            {"timestamp": "Nov 01, 2026 - 09:10 AM", "user": "Ava Morgan", "event": "Generated NACHA ACH Bank Batch File", "terminal": "Terminal NY-01", "status": "Success", "visibility": "super_admin"},
+            {"timestamp": "Nov 01, 2026 - 08:45 AM", "user": "Ava Morgan", "event": "Updated Master Record: EMP-002 (Alex Smith)", "terminal": "Terminal NY-01", "status": "Success", "visibility": "all"},
+            {"timestamp": "Oct 31, 2026 - 05:30 PM", "user": "Marcus Sterling", "event": "Recalculated BIR TRAIN Law Statutory Tables", "terminal": "Terminal NY-02", "status": "Success", "visibility": "all"},
+            {"timestamp": "Oct 31, 2026 - 02:15 PM", "user": "Chloe Bennet", "event": "Exported Compliance Vault Report (PDF)", "terminal": "Terminal NY-03", "status": "Success", "visibility": "all"},
+            {"timestamp": "Oct 30, 2026 - 11:00 AM", "user": "Ava Morgan", "event": "Created Automated Cloud Backup Snapshot", "terminal": "Automated Cron", "status": "Success", "visibility": "super_admin"}
         ]
 
         self.setup_layout()
@@ -110,11 +165,11 @@ class SteadypaySettingsPage(tk.Tk):
     # LAYOUT SETUP
     # ==========================================
     def setup_layout(self):
-        # 1. Left Fixed Sidebar
-        self.create_sidebar()
-
-        # 2. Right Main Scrollable Area
-        self.create_scrollable_main_content()
+        if self.controller is None:
+            self.create_sidebar()
+            self.create_scrollable_main_content()
+        else:
+            self.create_scrollable_main_content(parent=self)
 
     # ==========================================
     # SIDEBAR NAVIGATION
@@ -151,7 +206,7 @@ class SteadypaySettingsPage(tk.Tk):
         # Navigation Menu List
         menu_items = [
             ("🏠", "Dashboard", False),
-            ("👥", "Employee\nmanagement", False),
+            ("👥", "Workforce\nDirectory", False),
             ("💳", "Process payroll", False),
             ("📄", "Payroll &\nPayslips", False),
             ("⚙️", "Settings", True)
@@ -221,12 +276,24 @@ class SteadypaySettingsPage(tk.Tk):
             widget.bind("<Button-1>", lambda e: self.handle_logout())
 
     def on_menu_click(self, menu_name):
+        menu_to_page = {
+            "Dashboard": "dashboard",
+            "Workforce\nDirectory": "employee",
+            "Process payroll": "process_pay",
+            "Payroll &\nPayslips": "pay_records_slips",
+            "Settings": "settings"
+        }
+        if self.controller:
+            page = menu_to_page.get(menu_name, "dashboard")
+            self.controller.show_page(page)
+            return
+
         if menu_name == "Dashboard":
             self.navigate_to_dashboard()
             return
 
         menu_map = {
-            "Employee\nmanagement": "aEmployee.py",
+            "Workforce\nDirectory": "aEmployee.py",
             "Process payroll": "aProcessPay.py",
             "Payroll &\nPayslips": "aPayRecord&Slip.py",
             "Settings": "aSettings.py"
@@ -241,9 +308,12 @@ class SteadypaySettingsPage(tk.Tk):
     # ==========================================
     # SCROLLABLE MAIN CONTENT AREA
     # ==========================================
-    def create_scrollable_main_content(self):
-        right_container = tk.Frame(self, bg=self.colors["white"])
-        right_container.pack(side="right", fill="both", expand=True)
+    def create_scrollable_main_content(self, parent=None):
+        if parent is None:
+            right_container = tk.Frame(self, bg=self.colors["white"])
+            right_container.pack(side="right", fill="both", expand=True)
+        else:
+            right_container = parent
 
         # Fixed top header outside canvas
         self.create_top_header(right_container)
@@ -268,9 +338,7 @@ class SteadypaySettingsPage(tk.Tk):
         self.main_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.main_canvas.bind("<MouseWheel>", self._on_mousewheel)
 
         # 1. Top Settings Category Switcher Navigation
         self.create_settings_nav_tabs(self.content_frame)
@@ -281,6 +349,15 @@ class SteadypaySettingsPage(tk.Tk):
 
         # Render initial active setting tab
         self.render_active_tab()
+
+    def _on_mousewheel(self, event):
+        if hasattr(self, "main_canvas") and self.main_canvas.winfo_exists():
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_show(self):
+        """Called whenever this tab is brought into view."""
+        if hasattr(self, "main_canvas"):
+            self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
     # ==========================================
     # FIXED TOP HEADER
@@ -363,7 +440,7 @@ class SteadypaySettingsPage(tk.Tk):
 
         tk.Label(
             profile_info,
-            text=self.admin_data["role"],
+            text=f"{self.user.role_title}" if self.user.is_standard_admin() else self.admin_data["role"],
             font=("Segoe UI", 7),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
@@ -386,7 +463,7 @@ class SteadypaySettingsPage(tk.Tk):
 
         self.tab_buttons_spec = [
             ("company", "🏢 Company Profile", "Legal entity & branding"),
-            ("tax", "⚖️ Statutory Taxes", "IRS & withholding tables"),
+            ("tax", "⚖️ Statutory Taxes", "BIR, SSS, PhilHealth & Pag-IBIG"),
             ("rules", "⏱️ Payroll Parameters", "Overtime & leave policies"),
             ("security", "🛡️ User Security", "Roles, MFA & sessions"),
             ("backup", "💾 Backups & Audit Logs", "Snapshot & activity trails")
@@ -486,7 +563,7 @@ class SteadypaySettingsPage(tk.Tk):
         entries = {}
         fields = [
             ("Company Legal Business Name", "legal_name", self.company_config["legal_name"], "Used on official payslips and tax filings"),
-            ("Employer Identification Number (EIN / Tax ID)", "ein", self.company_config["ein"], "Federal IRS Employer Identification Number"),
+            ("BIR Taxpayer Identification Number (TIN)", "ein", self.company_config["ein"], "Bureau of Internal Revenue (BIR) Employer TIN used for statutory filings and Form 2316"),
             ("Registered Corporate Headquarters Address", "address", self.company_config["address"], "Physical business domicile address"),
             ("Corporate Base Currency", "currency", self.company_config["currency"], "Standard accounting currency denomination"),
             ("Default Payroll Processing Frequency", "pay_cycle", self.company_config["pay_cycle"], "Primary payroll disbursement cycle schedule"),
@@ -504,16 +581,39 @@ class SteadypaySettingsPage(tk.Tk):
             input_box = tk.Frame(form_frame, bg=self.colors["white"])
             input_box.grid(row=idx, column=1, sticky="ew", pady=7)
 
+            is_super = self.user.has_role(Role.SUPER_ADMIN)
+
             if key == "currency":
-                cb = ttk.Combobox(input_box, values=["USD ($) - US Dollar", "EUR (€) - Euro", "GBP (£) - British Pound", "CAD ($) - Canadian Dollar"], state="readonly", font=("Segoe UI", 9))
-                cb.set(default_val)
-                cb.pack(fill="x", ipady=4)
-                entries[key] = cb
+                if not is_super:
+                    cb = ttk.Combobox(input_box, values=["USD ($) - US Dollar", "EUR (€) - Euro", "GBP (£) - British Pound", "CAD ($) - Canadian Dollar"], state="disabled", font=("Segoe UI", 9))
+                    cb.set(default_val)
+                    cb.pack(fill="x", ipady=4)
+                    lock_note = tk.Label(input_box, text="🔒 Read-Only: Corporate base currency is managed by Super Admin", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"])
+                    lock_note.pack(anchor="w", pady=(2, 0))
+                    ToolTip(cb, "Base accounting currency configuration is restricted to Super Admin.")
+                    ToolTip(lock_note, "Base accounting currency configuration is restricted to Super Admin.")
+                    entries[key] = cb
+                else:
+                    cb = ttk.Combobox(input_box, values=["USD ($) - US Dollar", "EUR (€) - Euro", "GBP (£) - British Pound", "CAD ($) - Canadian Dollar"], state="readonly", font=("Segoe UI", 9))
+                    cb.set(default_val)
+                    cb.pack(fill="x", ipady=4)
+                    entries[key] = cb
             elif key == "pay_cycle":
                 cb = ttk.Combobox(input_box, values=["Semi-Monthly (1st-15th & 16th-End)", "Bi-Weekly (Every 2 Weeks)", "Monthly (End of Month)", "Weekly (Every Friday)"], state="readonly", font=("Segoe UI", 9))
                 cb.set(default_val)
                 cb.pack(fill="x", ipady=4)
                 entries[key] = cb
+            elif key == "ein" and not is_super:
+                ent_frame = tk.Frame(input_box, bg="#F5F7F8", highlightbackground=self.colors["border_light"], highlightthickness=1)
+                ent_frame.pack(fill="x")
+                ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg="#F5F7F8", fg="#7F8C8D", bd=0, relief="flat", state="readonly")
+                ent.insert(0, default_val)
+                ent.pack(fill="x", ipady=6, padx=8)
+                lock_note = tk.Label(input_box, text="🔒 Read-Only: BIR Employer TIN is managed by Super Admin", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"])
+                lock_note.pack(anchor="w", pady=(2, 0))
+                ToolTip(ent, "BIR Taxpayer Identification Number (TIN) is tax-sensitive and locked by Super Admin.")
+                ToolTip(lock_note, "BIR Taxpayer Identification Number (TIN) is tax-sensitive and locked by Super Admin.")
+                entries[key] = ent
             else:
                 ent_frame = tk.Frame(input_box, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1)
                 ent_frame.pack(fill="x")
@@ -529,9 +629,11 @@ class SteadypaySettingsPage(tk.Tk):
         def _save_company():
             new_name = entries["legal_name"].get().strip()
             self.company_config["legal_name"] = new_name
-            self.company_config["ein"] = entries["ein"].get().strip()
+            # Only persist EIN & Currency if authenticated as Super Admin
+            if self.user.has_role(Role.SUPER_ADMIN):
+                self.company_config["ein"] = entries["ein"].get().strip()
+                self.company_config["currency"] = entries["currency"].get().strip()
             self.company_config["address"] = entries["address"].get().strip()
-            self.company_config["currency"] = entries["currency"].get().strip()
             self.company_config["pay_cycle"] = entries["pay_cycle"].get().strip()
             self.company_config["payroll_email"] = entries["payroll_email"].get().strip()
             self.company_config["phone"] = entries["phone"].get().strip()
@@ -540,7 +642,15 @@ class SteadypaySettingsPage(tk.Tk):
                 import data
                 data.COMPANY_DATA["legal_name"] = new_name
                 data.COMPANY_DATA["name"] = new_name
+                data.COMPANY_DATA["address"] = self.company_config["address"]
+                data.COMPANY_DATA["pay_cycle"] = self.company_config["pay_cycle"]
+                data.COMPANY_DATA["payroll_email"] = self.company_config["payroll_email"]
+                data.COMPANY_DATA["phone"] = self.company_config["phone"]
+                if self.user.has_role(Role.SUPER_ADMIN):
+                    data.COMPANY_DATA["ein"] = self.company_config["ein"]
+                    data.COMPANY_DATA["currency"] = self.company_config["currency"]
                 data.ADMIN_DATA["company_name"] = new_name
+                data.save_data()
             except Exception:
                 pass
             messagebox.showinfo("Workspace Settings Saved", "✓ Company workspace profile and official headers updated successfully!", parent=self)
@@ -581,11 +691,20 @@ class SteadypaySettingsPage(tk.Tk):
         left_hdr = tk.Frame(hdr, bg=self.colors["white"])
         left_hdr.pack(side="left")
 
-        tk.Label(left_hdr, text="2. STATUTORY CONTRIBUTIONS & TAX RULES", font=("Segoe UI", 9, "bold"), fg=self.colors["primary_orange"], bg=self.colors["white"]).pack(anchor="w")
-        tk.Label(left_hdr, text="Federal, State, and FICA statutory withholding formulas & legal tax caps.", font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(2, 0))
+        tk.Label(left_hdr, text="2. PHILIPPINE STATUTORY CONTRIBUTIONS & TAX RULES", font=("Segoe UI", 9, "bold"), fg=self.colors["primary_orange"], bg=self.colors["white"]).pack(anchor="w")
+        tk.Label(left_hdr, text="BIR Withholding (TRAIN Law), SSS, PhilHealth, and Pag-IBIG statutory formulas & legal caps.", font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(2, 0))
 
-        status_badge = RoundedBadge(hdr, text="✓ 2026 IRS Compliant", bg_color=self.colors["pill_approved"], fg_color=self.colors["pill_approved_text"], radius=8, width=130, height=22, parent_bg=self.colors["white"])
+        status_badge = RoundedBadge(hdr, text="✓ BIR & TRAIN Compliant", bg_color=self.colors["pill_approved"], fg_color=self.colors["pill_approved_text"], radius=8, width=150, height=22, parent_bg=self.colors["white"])
         status_badge.pack(side="right")
+
+        is_super = self.user.has_role(Role.SUPER_ADMIN)
+
+        # Standard Admin Warning Banner
+        if not is_super:
+            banner = tk.Frame(card, bg="#FFF8E7", highlightbackground=self.colors["border_peach"], highlightthickness=1, padx=14, pady=9)
+            banner.pack(fill="x", pady=(0, 14))
+            tk.Label(banner, text="🔒 Access Restricted: Philippine statutory tax rules are locked and managed by Super Admin.", font=("Segoe UI", 8, "bold"), fg="#B76E00", bg="#FFF8E7").pack(side="left")
+            tk.Label(banner, text="Standard Admins have read-only access for withholding formula audits.", font=("Segoe UI", 7), fg="#788896", bg="#FFF8E7").pack(side="right")
 
         # Tax Table Inputs Grid
         form_frame = tk.Frame(card, bg=self.colors["white"])
@@ -595,13 +714,12 @@ class SteadypaySettingsPage(tk.Tk):
 
         tax_entries = {}
         tax_fields = [
-            ("Federal Income Tax Standard Baseline Rate (%)", "fed_income_tax", str(self.tax_config["fed_income_tax"]), "IRS Publication 15 baseline withholding formula"),
-            ("State Withholding Tax Benchmark Rate (%)", "state_tax", str(self.tax_config["state_tax"]), "State employee income tax deduction standard"),
-            ("FICA Social Security Employee Rate (%)", "fica_ss_rate", str(self.tax_config["fica_ss_rate"]), "Statutory Social Security contribution (6.2%)"),
-            ("FICA Social Security Annual Wage Cap ($)", "fica_ss_cap", f"{self.tax_config['fica_ss_cap']:,.2f}", "Maximum annual earnings subject to OASDI tax ($168,600)"),
-            ("FICA Medicare Employee Standard Rate (%)", "fica_medicare_rate", str(self.tax_config["fica_medicare_rate"]), "Statutory Medicare hospital insurance rate (1.45%)"),
-            ("Federal Unemployment Tax Act (FUTA) Rate (%)", "futa_rate", str(self.tax_config["futa_rate"]), "Net federal employer unemployment rate (0.6%)"),
-            ("Statutory Guidelines Version Reference", "tax_year", self.tax_config["tax_year"], "Official government tax publication version")
+            ("BIR Withholding Tax Benchmark Rate (%)", "bir_withholding_tax", str(self.tax_config["bir_withholding_tax"]), "BIR TRAIN Law compensation withholding tax benchmark rate"),
+            ("SSS Employee Contribution Rate (%)", "sss_rate", str(self.tax_config["sss_rate"]), "Social Security System (RA 11199) employee mandatory share"),
+            ("SSS Maximum Monthly Salary Credit (MSC)", "sss_max_msc", f"{self.tax_config['sss_max_msc']:,.2f}", "Maximum SSS monthly salary credit threshold (₱30,000)"),
+            ("PhilHealth Employee Premium Share (%)", "philhealth_rate", str(self.tax_config["philhealth_rate"]), "Universal Health Care Act (RA 11223) employee share (5.0% total split equally)"),
+            ("Pag-IBIG / HDMF Contribution Rate (%)", "pagibig_rate", str(self.tax_config["pagibig_rate"]), "Home Development Mutual Fund (RA 9679) employee mandatory rate"),
+            ("Statutory Guidelines Version Reference", "tax_year", self.tax_config["tax_year"], "Official BIR RR 11-2018 / TRAIN Law Revised Withholding Tables")
         ]
 
         for idx, (label, key, default_val, hint) in enumerate(tax_fields):
@@ -615,50 +733,90 @@ class SteadypaySettingsPage(tk.Tk):
             input_box.grid(row=idx, column=1, sticky="ew", pady=7)
 
             if key == "tax_year":
-                cb = ttk.Combobox(input_box, values=["2026 IRS Publication 15 (Circular E)", "2025 IRS Statutory Tables", "Custom Multi-State Guidelines"], state="readonly", font=("Segoe UI", 9))
+                cb = ttk.Combobox(
+                    input_box,
+                    values=["BIR TRAIN Law (RA 10963) / RR No. 11-2018", "BIR Revised Withholding Tax Table 2026", "Custom BIR Statutory Matrix"],
+                    state="disabled" if not is_super else "readonly",
+                    font=("Segoe UI", 9)
+                )
                 cb.set(default_val)
                 cb.pack(fill="x", ipady=4)
+                if not is_super:
+                    ToolTip(cb, "Statutory tax rules are locked and managed by Super Admin.")
                 tax_entries[key] = cb
             else:
-                ent_frame = tk.Frame(input_box, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1)
-                ent_frame.pack(fill="x")
-                ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg=self.colors["white"], fg=self.colors["text_dark"], bd=0, relief="flat")
-                ent.insert(0, default_val)
-                ent.pack(fill="x", ipady=6, padx=8)
-                tax_entries[key] = ent
+                if not is_super:
+                    ent_frame = tk.Frame(input_box, bg="#F5F7F8", highlightbackground=self.colors["border_light"], highlightthickness=1)
+                    ent_frame.pack(fill="x")
+                    ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg="#F5F7F8", fg="#7F8C8D", bd=0, relief="flat", state="readonly")
+                    ent.insert(0, default_val)
+                    ent.pack(fill="x", ipady=6, padx=8)
+                    ToolTip(ent, "Statutory tax rules are locked and managed by Super Admin.")
+                    tax_entries[key] = ent
+                else:
+                    ent_frame = tk.Frame(input_box, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1)
+                    ent_frame.pack(fill="x")
+                    ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg=self.colors["white"], fg=self.colors["text_dark"], bd=0, relief="flat")
+                    ent.insert(0, default_val)
+                    ent.pack(fill="x", ipady=6, padx=8)
+                    tax_entries[key] = ent
 
         # Footer Actions
         footer = tk.Frame(card, bg=self.colors["white"], pady=12)
         footer.pack(fill="x")
 
         def _test_tax():
+            if not self.user.has_role(Role.SUPER_ADMIN):
+                messagebox.showwarning(
+                    "Permission Denied",
+                    "Access Denied: Standard Admins cannot execute statutory tax formula tests.\n\nSuper Admin authorization is required.",
+                    parent=self
+                )
+                return
+
             messagebox.showinfo(
                 "Tax Engine Verification",
-                "✓ Tax calculation engine executed sample run:\n\n"
-                "Sample Base: $5,000.00\n"
-                "• Federal Tax (10.5%): $525.00\n"
-                "• State Tax (4.5%): $225.00\n"
-                "• FICA Social Security (6.2%): $310.00\n"
-                "• FICA Medicare (1.45%): $72.50\n"
-                "Total Statutory Withholding: $1,132.50 (22.65%)\n\n"
-                "All statutory formulas passed IRS parity tests.",
+                "✓ Philippine tax calculation engine executed sample run:\n\n"
+                "Sample Base Salary: $5,000.00\n"
+                "• BIR Withholding Tax (TRAIN Law 10.0%): $500.00\n"
+                "• SSS Employee Contribution (4.5%): $225.00\n"
+                "• PhilHealth Employee Share (2.5%): $125.00\n"
+                "• Pag-IBIG / HDMF Contribution (2.0%): $100.00\n"
+                "Total Statutory Deductions: $950.00 (19.00%)\n\n"
+                "All statutory formulas passed BIR (TRAIN Law), SSS, PhilHealth, and Pag-IBIG compliance tests.",
                 parent=self
             )
 
         def _save_tax():
+            if not self.user.has_role(Role.SUPER_ADMIN):
+                messagebox.showwarning(
+                    "Permission Denied",
+                    "Access Denied: Standard Admins cannot modify statutory tax rules or withholding percentages.\n\nStatutory tax rules are locked and managed by Super Admin.",
+                    parent=self
+                )
+                return
+
             try:
-                self.tax_config["fed_income_tax"] = float(tax_entries["fed_income_tax"].get().replace("%", "").strip())
-                self.tax_config["state_tax"] = float(tax_entries["state_tax"].get().replace("%", "").strip())
-                self.tax_config["fica_ss_rate"] = float(tax_entries["fica_ss_rate"].get().replace("%", "").strip())
-                self.tax_config["fica_medicare_rate"] = float(tax_entries["fica_medicare_rate"].get().replace("%", "").strip())
-                self.tax_config["futa_rate"] = float(tax_entries["futa_rate"].get().replace("%", "").strip())
+                self.tax_config["bir_withholding_tax"] = float(tax_entries["bir_withholding_tax"].get().replace("%", "").strip())
+                self.tax_config["sss_rate"] = float(tax_entries["sss_rate"].get().replace("%", "").strip())
+                self.tax_config["philhealth_rate"] = float(tax_entries["philhealth_rate"].get().replace("%", "").strip())
+                self.tax_config["pagibig_rate"] = float(tax_entries["pagibig_rate"].get().replace("%", "").strip())
                 self.tax_config["tax_year"] = tax_entries["tax_year"].get().strip()
-                messagebox.showinfo("Tax Rules Updated", "✓ Statutory contribution percentages and tax withholding engine updated!", parent=self)
+                messagebox.showinfo("Tax Rules Updated", "✓ Philippine statutory contribution percentages and BIR tax withholding engine updated!", parent=self)
             except ValueError:
                 messagebox.showerror("Invalid Rate", "Please ensure tax rates are valid decimal figures.", parent=self)
 
-        tk.Button(footer, text="Test Tax Formula ⚡", font=("Segoe UI", 8, "bold"), bg=self.colors["sidebar_bg"], fg=self.colors["dark_teal"], bd=0, relief="flat", cursor="hand2", padx=14, pady=7, command=_test_tax).pack(side="left")
-        tk.Button(footer, text="Update Statutory Rules 💾", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=16, pady=7, command=_save_tax).pack(side="right")
+        if is_super:
+            tk.Button(footer, text="Test Tax Formula ⚡", font=("Segoe UI", 8, "bold"), bg=self.colors["sidebar_bg"], fg=self.colors["dark_teal"], bd=0, relief="flat", cursor="hand2", padx=14, pady=7, command=_test_tax).pack(side="left")
+            tk.Button(footer, text="Update Statutory Rules 💾", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=16, pady=7, command=_save_tax).pack(side="right")
+        else:
+            test_lbl = tk.Label(footer, text="🔒 Test Tax Formula (Super Admin Only)", font=("Segoe UI", 8, "bold"), bg="#F0F4F4", fg=self.colors["gray_text"], padx=14, pady=7, relief="flat", cursor="no")
+            test_lbl.pack(side="left")
+            ToolTip(test_lbl, "Statutory tax test execution is restricted to Super Admin.")
+
+            save_tax_lbl = tk.Label(footer, text="🔒 Update Statutory Rules (Locked)", font=("Segoe UI", 8, "bold"), bg="#F0F4F4", fg=self.colors["gray_text"], padx=16, pady=7, relief="flat", cursor="no")
+            save_tax_lbl.pack(side="right")
+            ToolTip(save_tax_lbl, "Statutory tax rules are locked and managed by Super Admin.")
 
     # =========================================================================
     # MODULE 3: PAYROLL RULES & CALCULATION PARAMETERS
@@ -686,6 +844,15 @@ class SteadypaySettingsPage(tk.Tk):
 
         status_badge = RoundedBadge(hdr, text="✓ Standard FLSA Rules", bg_color=self.colors["pill_approved"], fg_color=self.colors["pill_approved_text"], radius=8, width=135, height=22, parent_bg=self.colors["white"])
         status_badge.pack(side="right")
+
+        is_super = self.user.has_role(Role.SUPER_ADMIN)
+
+        # Standard Admin Warning Banner
+        if not is_super:
+            banner = tk.Frame(card, bg="#FFF8E7", highlightbackground=self.colors["border_peach"], highlightthickness=1, padx=14, pady=9)
+            banner.pack(fill="x", pady=(0, 14))
+            tk.Label(banner, text="🔒 Access Restricted: Payroll rules and calculation parameters are locked and managed by Super Admin.", font=("Segoe UI", 8, "bold"), fg="#B76E00", bg="#FFF8E7").pack(side="left")
+            tk.Label(banner, text="Standard Admins have read-only access to standard overtime & leave parameters.", font=("Segoe UI", 7), fg="#788896", bg="#FFF8E7").pack(side="right")
 
         form_frame = tk.Frame(card, bg=self.colors["white"])
         form_frame.pack(fill="both", expand=True)
@@ -715,22 +882,46 @@ class SteadypaySettingsPage(tk.Tk):
             input_box.grid(row=idx, column=1, sticky="ew", pady=7)
 
             if key == "unpaid_leave_formula":
-                cb = ttk.Combobox(input_box, values=["Prorated (Base Salary ÷ 20 Days)", "Hourly Prorated (Base ÷ 160h × Hours Missed)", "Full Daily Equivalent (Base ÷ 21.67 Days)"], state="readonly", font=("Segoe UI", 9))
+                cb = ttk.Combobox(
+                    input_box,
+                    values=["Prorated (Base Salary ÷ 20 Days)", "Hourly Prorated (Base ÷ 160h × Hours Missed)", "Full Daily Equivalent (Base ÷ 21.67 Days)"],
+                    state="disabled" if not is_super else "readonly",
+                    font=("Segoe UI", 9)
+                )
                 cb.set(default_val)
                 cb.pack(fill="x", ipady=4)
+                if not is_super:
+                    ToolTip(cb, "Payroll deduction formulas and unpaid leave rules are locked by Super Admin.")
                 rule_entries[key] = cb
             else:
-                ent_frame = tk.Frame(input_box, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1)
-                ent_frame.pack(fill="x")
-                ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg=self.colors["white"], fg=self.colors["text_dark"], bd=0, relief="flat")
-                ent.insert(0, default_val)
-                ent.pack(fill="x", ipady=6, padx=8)
-                rule_entries[key] = ent
+                if not is_super:
+                    ent_frame = tk.Frame(input_box, bg="#F5F7F8", highlightbackground=self.colors["border_light"], highlightthickness=1)
+                    ent_frame.pack(fill="x")
+                    ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg="#F5F7F8", fg="#7F8C8D", bd=0, relief="flat", state="readonly")
+                    ent.insert(0, default_val)
+                    ent.pack(fill="x", ipady=6, padx=8)
+                    ToolTip(ent, "Payroll rules and overtime formulas are locked and managed by Super Admin.")
+                    rule_entries[key] = ent
+                else:
+                    ent_frame = tk.Frame(input_box, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1)
+                    ent_frame.pack(fill="x")
+                    ent = tk.Entry(ent_frame, font=("Segoe UI", 9), bg=self.colors["white"], fg=self.colors["text_dark"], bd=0, relief="flat")
+                    ent.insert(0, default_val)
+                    ent.pack(fill="x", ipady=6, padx=8)
+                    rule_entries[key] = ent
 
         footer = tk.Frame(card, bg=self.colors["white"], pady=12)
         footer.pack(fill="x")
 
         def _save_rules():
+            if not self.user.has_role(Role.SUPER_ADMIN):
+                messagebox.showwarning(
+                    "Permission Denied",
+                    "Access Denied: Standard Admins cannot modify payroll calculation rules or overtime policies.\n\nSuper Admin authorization is required.",
+                    parent=self
+                )
+                return
+
             try:
                 self.payroll_rules["weekly_hours"] = float(rule_entries["weekly_hours"].get().replace("hrs", "").strip())
                 self.payroll_rules["monthly_hours_cap"] = float(rule_entries["monthly_hours_cap"].get().replace("hrs", "").strip())
@@ -741,7 +932,12 @@ class SteadypaySettingsPage(tk.Tk):
             except ValueError:
                 messagebox.showerror("Invalid Parameter", "Please enter valid numeric parameters.", parent=self)
 
-        tk.Button(footer, text="Save Payroll Parameters 💾", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=16, pady=7, command=_save_rules).pack(side="right")
+        if is_super:
+            tk.Button(footer, text="Save Payroll Parameters 💾", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=16, pady=7, command=_save_rules).pack(side="right")
+        else:
+            save_rules_lbl = tk.Label(footer, text="🔒 Save Payroll Parameters (Locked)", font=("Segoe UI", 8, "bold"), bg="#F0F4F4", fg=self.colors["gray_text"], padx=16, pady=7, relief="flat", cursor="no")
+            save_rules_lbl.pack(side="right")
+            ToolTip(save_rules_lbl, "Payroll calculation parameters are locked and managed by Super Admin.")
 
     # =========================================================================
     # MODULE 4: USER ACCESS & SECURITY MANAGEMENT
@@ -767,8 +963,15 @@ class SteadypaySettingsPage(tk.Tk):
         tk.Label(left_hdr, text="4. USER ACCESS & SECURITY MANAGEMENT", font=("Segoe UI", 8, "bold"), fg=self.colors["primary_orange"], bg=self.colors["white"]).pack(anchor="w")
         tk.Label(left_hdr, text="Role-Based Access Control (RBAC), multi-factor authentication & session policies.", font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(2, 0))
 
-        add_user_btn = tk.Button(hdr, text="+ Invite Admin / Staff", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=12, pady=6, command=self.action_invite_admin_dialog)
-        add_user_btn.pack(side="right")
+        is_super = self.user.has_role(Role.SUPER_ADMIN)
+
+        if is_super:
+            add_user_btn = tk.Button(hdr, text="+ Invite Admin / Staff", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=12, pady=6, command=self.action_invite_admin_dialog)
+            add_user_btn.pack(side="right")
+        else:
+            add_user_lbl = tk.Label(hdr, text="🔒 Admin Management (Super Admin Only)", font=("Segoe UI", 8, "bold"), bg="#F0F4F4", fg=self.colors["gray_text"], padx=12, pady=6, relief="flat", cursor="no")
+            add_user_lbl.pack(side="right")
+            ToolTip(add_user_lbl, "Security user invitations and RBAC configurations require Super Admin authorization.")
 
         # Security Policy Tiles
         sec_tiles = tk.Frame(card, bg=self.colors["white"])
@@ -827,6 +1030,14 @@ class SteadypaySettingsPage(tk.Tk):
             tk.Label(grid_frame, text="● " + u["status"], font=("Segoe UI", 7, "bold"), fg=self.colors["pill_approved_text"], bg=self.colors["white"]).grid(row=r_idx, column=4, padx=6, pady=4)
 
     def action_invite_admin_dialog(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Permission Denied",
+                "Access Denied: Standard Admins cannot invite new administrative users or configure security roles.\n\nSuper Admin authorization is required.",
+                parent=self
+            )
+            return
+
         messagebox.showinfo("Invite Administrator", "Security authorization link dispatched to new administrator invitation queue.", parent=self)
 
     # =========================================================================
@@ -857,8 +1068,12 @@ class SteadypaySettingsPage(tk.Tk):
         btn_box = tk.Frame(hdr, bg=self.colors["white"])
         btn_box.pack(side="right")
 
-        tk.Button(btn_box, text="🔄 Restore Snapshot", font=("Segoe UI", 8, "bold"), bg=self.colors["white"], fg=self.colors["dark_teal"], highlightbackground=self.colors["dark_teal"], highlightthickness=1, bd=0, relief="flat", cursor="hand2", padx=10, pady=5, command=self.action_restore_snapshot).pack(side="left", padx=(0, 8))
-        tk.Button(btn_box, text="💾 Instant Backup Snapshot", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=12, pady=6, command=self.action_create_backup_snapshot).pack(side="left")
+        is_super = self.user.has_role(Role.SUPER_ADMIN)
+
+        if is_super:
+            tk.Button(btn_box, text="🔄 Restore Snapshot", font=("Segoe UI", 8, "bold"), bg=self.colors["white"], fg=self.colors["dark_teal"], highlightbackground=self.colors["dark_teal"], highlightthickness=1, bd=0, relief="flat", cursor="hand2", padx=10, pady=5, command=self.action_restore_snapshot).pack(side="left", padx=(0, 8))
+            tk.Button(btn_box, text="💾 Instant Backup Snapshot", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=12, pady=6, command=self.action_create_backup_snapshot).pack(side="left")
+
 
         # Snapshot Status Ribbon
         status_box = tk.Frame(card, bg="#F7FCFC", highlightbackground=self.colors["border_light"], highlightthickness=1, padx=12, pady=8)
@@ -890,7 +1105,13 @@ class SteadypaySettingsPage(tk.Tk):
             tk.Label(grid_frame, text=c_name, font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"], anchor=align).grid(row=0, column=idx, sticky="ew", padx=6, pady=(0, 6))
         tk.Frame(grid_frame, height=1, bg=self.colors["border_light"]).grid(row=1, column=0, columnspan=len(cols), sticky="ew", pady=(0, 6))
 
-        for r_idx, log in enumerate(self.audit_logs, start=2):
+        # Filter audit logs based on user role
+        if is_super:
+            visible_logs = self.audit_logs  # Super Admin sees all logs
+        else:
+            visible_logs = [log for log in self.audit_logs if log.get("visibility") == "all"]
+
+        for r_idx, log in enumerate(visible_logs, start=2):
             tk.Label(grid_frame, text=log["timestamp"], font=("Segoe UI", 7), fg=self.colors["gray_text"], bg=self.colors["white"], anchor="w").grid(row=r_idx, column=0, sticky="ew", padx=6, pady=4)
             tk.Label(grid_frame, text=log["user"], font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"], anchor="w").grid(row=r_idx, column=1, sticky="ew", padx=6, pady=4)
             tk.Label(grid_frame, text=log["event"], font=("Segoe UI", 8), fg=self.colors["text_dark"], bg=self.colors["white"], anchor="w").grid(row=r_idx, column=2, sticky="ew", padx=6, pady=4)
@@ -900,6 +1121,14 @@ class SteadypaySettingsPage(tk.Tk):
 
     def action_create_backup_snapshot(self):
         """Creates a timestamped JSON/BAK backup archive."""
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Permission Denied",
+                "Access Denied: Standard Admins cannot generate system database backup snapshots.\n\nDatabase backup utilities are strictly restricted to Super Admin.",
+                parent=self
+            )
+            return
+
         default_file = f"Steadypay_Backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         filepath = filedialog.asksaveasfilename(
             parent=self,
@@ -928,6 +1157,14 @@ class SteadypaySettingsPage(tk.Tk):
             messagebox.showerror("Backup Failed", f"Could not write backup snapshot:\n{str(e)}", parent=self)
 
     def action_restore_snapshot(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Permission Denied",
+                "Access Denied: Standard Admins cannot restore database state from backup archives.\n\nDatabase recovery utilities are strictly restricted to Super Admin.",
+                parent=self
+            )
+            return
+
         filepath = filedialog.askopenfilename(
             parent=self,
             title="Select Backup Archive",
@@ -966,17 +1203,24 @@ class SteadypaySettingsPage(tk.Tk):
     # NAVIGATION HANDLERS
     # ==========================================
     def navigate_to_dashboard(self):
+        if self.controller:
+            self.controller.show_page("dashboard")
+            return
         self.destroy()
         dashboard_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aDashboard.py")
         if os.path.exists(dashboard_script):
             subprocess.Popen([sys.executable, dashboard_script])
 
     def handle_logout(self):
+        if self.controller:
+            self.controller.handle_logout()
+            return
         self.destroy()
         login_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login.py")
         if os.path.exists(login_script):
             subprocess.Popen([sys.executable, login_script])
 
 if __name__ == "__main__":
-    app = SteadypaySettingsPage()
+    from aDashboard import SteadypayAdminDashboard
+    app = SteadypayAdminDashboard(initial_page="settings")
     app.mainloop()

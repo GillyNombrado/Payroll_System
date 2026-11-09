@@ -5,16 +5,26 @@ import datetime
 import csv
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from data import get_admin_data, RoundedBadge
+from data import get_admin_data, RoundedBadge, Role, get_current_user
 
-class SteadypayEmployeePage(tk.Tk):
-    def __init__(self):
-        super().__init__()
+class SteadypayEmployeePage(tk.Frame):
+    def __init__(self, parent=None, controller=None):
+        if parent is None:
+            self.root = tk.Tk()
+            self.root.title("Steadypay - Workforce Directory")
+            self.root.geometry("1240x780")
+            self.root.minsize(1120, 680)
+            self.root.configure(bg="#FFFFFF")
+            super().__init__(self.root, bg="#FFFFFF")
+            self.pack(fill="both", expand=True)
+            self.controller = controller
+        else:
+            self.root = parent.winfo_toplevel()
+            super().__init__(parent, bg="#FFFFFF")
+            self.controller = controller
 
-        self.title("Steadypay - Employee Management & HR Directory (Admin)")
-        self.geometry("1240x780")
-        self.minsize(1120, 680)
-        self.configure(bg="#FFFFFF")
+        # Authenticated Session & Role Check (Standard Admin)
+        self.user = get_current_user()
 
         # Color Palette Definition (Based on Steadypay visual design)
         self.colors = {
@@ -59,13 +69,13 @@ class SteadypayEmployeePage(tk.Tk):
                 "hire_date": "March 15, 2022",
                 "emp_type": "Full-Time",
                 "bank_account": "****4821",
-                "tax_status": "Single (0)",
+                "tax_status": "Single (BIR Form 2316)",
                 "pto_balance": 14,
                 "avatar_color": "#FF9F1C",
                 "initials": "JD",
                 "emergency_contact": "Mark Doe (Spouse) - +1 (555) 234-9082",
                 "i9_verified": True,
-                "w4_verified": True
+                "bir_2316_verified": True
             },
             {
                 "id": "EMP-002",
@@ -79,13 +89,13 @@ class SteadypayEmployeePage(tk.Tk):
                 "hire_date": "June 1, 2023",
                 "emp_type": "Full-Time",
                 "bank_account": "****9102",
-                "tax_status": "Married (1)",
+                "tax_status": "Married (BIR Form 2316)",
                 "pto_balance": 12,
                 "avatar_color": "#2EC4B6",
                 "initials": "AS",
                 "emergency_contact": "Sarah Smith (Sister) - +1 (555) 781-3499",
                 "i9_verified": True,
-                "w4_verified": True
+                "bir_2316_verified": True
             },
             {
                 "id": "EMP-003",
@@ -99,13 +109,13 @@ class SteadypayEmployeePage(tk.Tk):
                 "hire_date": "January 10, 2024",
                 "emp_type": "Full-Time",
                 "bank_account": "****3321",
-                "tax_status": "Single (1)",
+                "tax_status": "Single (BIR Form 2316)",
                 "pto_balance": 10,
                 "avatar_color": "#FFBF69",
                 "initials": "MS",
                 "emergency_contact": "Carlos Santos (Father) - +1 (555) 492-1100",
                 "i9_verified": True,
-                "w4_verified": True
+                "bir_2316_verified": True
             },
             {
                 "id": "EMP-004",
@@ -119,13 +129,13 @@ class SteadypayEmployeePage(tk.Tk):
                 "hire_date": "August 20, 2021",
                 "emp_type": "Full-Time",
                 "bank_account": "****8874",
-                "tax_status": "Married (2)",
+                "tax_status": "Married (BIR Form 2316)",
                 "pto_balance": 6,
                 "avatar_color": "#4ED8C8",
                 "initials": "LJ",
                 "emergency_contact": "Emma Johnson (Spouse) - +1 (555) 883-2941",
                 "i9_verified": True,
-                "w4_verified": True
+                "bir_2316_verified": True
             },
             {
                 "id": "EMP-005",
@@ -139,13 +149,13 @@ class SteadypayEmployeePage(tk.Tk):
                 "hire_date": "November 5, 2022",
                 "emp_type": "Full-Time",
                 "bank_account": "****7621",
-                "tax_status": "Single (0)",
+                "tax_status": "Single (BIR Form 2316)",
                 "pto_balance": 11,
                 "avatar_color": "#FFAE42",
                 "initials": "DC",
                 "emergency_contact": "Grace Chen (Mother) - +1 (555) 304-7629",
                 "i9_verified": True,
-                "w4_verified": True
+                "bir_2316_verified": True
             }
         ]
 
@@ -161,11 +171,14 @@ class SteadypayEmployeePage(tk.Tk):
     # LAYOUT SETUP
     # ==========================================
     def setup_layout(self):
-        # 1. Left Fixed Sidebar
-        self.create_sidebar()
-
-        # 2. Right Main Scrollable Area
-        self.create_scrollable_main_content()
+        if self.controller is None:
+            # 1. Left Fixed Sidebar (standalone fallback)
+            self.create_sidebar()
+            # 2. Right Main Scrollable Area
+            self.create_scrollable_main_content()
+        else:
+            # Embedded in main app: fill frame directly with scrollable content
+            self.create_scrollable_main_content(parent=self)
 
     # ==========================================
     # SIDEBAR NAVIGATION
@@ -202,7 +215,7 @@ class SteadypayEmployeePage(tk.Tk):
         # Navigation Menu List
         menu_items = [
             ("🏠", "Dashboard", False),
-            ("👥", "Employee\nmanagement", True),
+            ("👥", "Workforce\nDirectory", True),
             ("💳", "Process payroll", False),
             ("📄", "Payroll &\nPayslips", False),
             ("⚙️", "Settings", False)
@@ -272,12 +285,24 @@ class SteadypayEmployeePage(tk.Tk):
             widget.bind("<Button-1>", lambda e: self.handle_logout())
 
     def on_menu_click(self, menu_name):
+        menu_to_page = {
+            "Dashboard": "dashboard",
+            "Workforce\nDirectory": "employee",
+            "Process payroll": "process_pay",
+            "Payroll &\nPayslips": "pay_records_slips",
+            "Settings": "settings"
+        }
+        if self.controller:
+            page = menu_to_page.get(menu_name, "dashboard")
+            self.controller.show_page(page)
+            return
+
         if menu_name == "Dashboard":
             self.navigate_to_dashboard()
             return
 
         menu_map = {
-            "Employee\nmanagement": "aEmployee.py",
+            "Workforce\nDirectory": "aEmployee.py",
             "Process payroll": "aProcessPay.py",
             "Payroll &\nPayslips": "aPayRecord&Slip.py",
             "Settings": "aSettings.py"
@@ -292,9 +317,12 @@ class SteadypayEmployeePage(tk.Tk):
     # ==========================================
     # SCROLLABLE MAIN CONTENT AREA
     # ==========================================
-    def create_scrollable_main_content(self):
-        right_container = tk.Frame(self, bg=self.colors["white"])
-        right_container.pack(side="right", fill="both", expand=True)
+    def create_scrollable_main_content(self, parent=None):
+        if parent is None:
+            right_container = tk.Frame(self, bg=self.colors["white"])
+            right_container.pack(side="right", fill="both", expand=True)
+        else:
+            right_container = parent
 
         # Fixed top header outside the canvas
         self.create_top_header(right_container)
@@ -319,13 +347,20 @@ class SteadypayEmployeePage(tk.Tk):
         self.main_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.main_canvas.bind("<MouseWheel>", self._on_mousewheel)
 
         # Populate Sections
         self.create_workforce_summary_cards(self.content_frame)
         self.create_employee_body(self.content_frame)
+
+    def _on_mousewheel(self, event):
+        if hasattr(self, "main_canvas") and self.main_canvas.winfo_exists():
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_show(self):
+        """Called whenever this tab is brought into view."""
+        if hasattr(self, "main_canvas"):
+            self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
     # ==========================================
     # TOP HEADER (FIXED)
@@ -500,14 +535,6 @@ class SteadypayEmployeePage(tk.Tk):
             bg=self.colors["white"]
         ).pack(anchor="w")
 
-        tk.Label(
-            left_hdr,
-            text="Click any employee row to open their full Comprehensive Master Record & Compliance Vault.",
-            font=("Segoe UI", 7),
-            fg=self.colors["gray_text"],
-            bg=self.colors["white"]
-        ).pack(anchor="w")
-
         # Right Controls: Department Filter + Status Filter + Search Entry
         right_ctrl = tk.Frame(card_hdr, bg=self.colors["white"])
         right_ctrl.pack(side="right")
@@ -616,21 +643,22 @@ class SteadypayEmployeePage(tk.Tk):
         left_actions = tk.Frame(actions_frame, bg=self.colors["white"])
         left_actions.pack(side="left")
 
-        tk.Button(
-            left_actions,
-            text="+ Onboard New Employee",
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["primary_orange"],
-            fg=self.colors["white"],
-            activebackground=self.colors["soft_orange"],
-            activeforeground=self.colors["white"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=14,
-            pady=7,
-            command=self.show_onboard_employee_wizard
-        ).pack(side="left", padx=(0, 8))
+        if self.user.has_role(Role.SUPER_ADMIN):
+            tk.Button(
+                left_actions,
+                text="+ Onboard New Employee",
+                font=("Segoe UI", 8, "bold"),
+                bg=self.colors["primary_orange"],
+                fg=self.colors["white"],
+                activebackground=self.colors["soft_orange"],
+                activeforeground=self.colors["white"],
+                bd=0,
+                relief="flat",
+                cursor="hand2",
+                padx=14,
+                pady=7,
+                command=self.show_onboard_employee_wizard
+            ).pack(side="left", padx=(0, 8))
 
         tk.Button(
             left_actions,
@@ -857,22 +885,42 @@ class SteadypayEmployeePage(tk.Tk):
             view_btn.pack(side="left", padx=(0, 4))
 
             if emp["status"] != "Offboarded":
-                offboard_btn = tk.Button(
-                    btn_box,
-                    text="Offboard",
-                    font=("Segoe UI", 7, "bold"),
-                    bg=self.colors["white"],
-                    fg="#E02424",
-                    highlightbackground="#E02424",
-                    highlightthickness=1,
-                    bd=0,
-                    relief="flat",
-                    cursor="hand2",
-                    padx=6,
-                    pady=2,
-                    command=lambda e=emp: self.show_offboarding_modal(e)
-                )
-                offboard_btn.pack(side="left")
+                if self.user.has_role(Role.SUPER_ADMIN):
+                    offboard_btn = tk.Button(
+                        btn_box,
+                        text="Offboard",
+                        font=("Segoe UI", 7, "bold"),
+                        bg=self.colors["white"],
+                        fg="#E02424",
+                        highlightbackground="#E02424",
+                        highlightthickness=1,
+                        bd=0,
+                        relief="flat",
+                        cursor="hand2",
+                        padx=6,
+                        pady=2,
+                        command=lambda e=emp: self.show_offboarding_modal(e)
+                    )
+                    offboard_btn.pack(side="left")
+                else:
+                    # Standard Admin: Disabled from direct offboarding; can request offboarding via approval
+                    has_req = bool(emp.get("offboard_request"))
+                    req_btn = tk.Button(
+                        btn_box,
+                        text="Req Pending ⏳" if has_req else "Req Offboard",
+                        font=("Segoe UI", 7, "bold" if has_req else "normal"),
+                        bg=self.colors["pill_pending"] if has_req else self.colors["white"],
+                        fg=self.colors["pill_pending_text"] if has_req else self.colors["gray_text"],
+                        highlightbackground=self.colors["soft_orange"] if has_req else self.colors["border_light"],
+                        highlightthickness=1,
+                        bd=0,
+                        relief="flat",
+                        cursor="hand2",
+                        padx=5,
+                        pady=2,
+                        command=lambda e=emp: self.request_offboarding_approval(e)
+                    )
+                    req_btn.pack(side="left")
 
             current_grid_row += 1
 
@@ -963,15 +1011,15 @@ class SteadypayEmployeePage(tk.Tk):
             ("Annualized Base Rate:", f"${ann_base:,.2f}"),
             ("Disbursement Method:", "EFT Direct Deposit"),
             ("Bank Account Ending:", emp["bank_account"]),
-            ("Tax Filing Classification:", f"IRS W-4: {emp['tax_status']}")
+            ("Tax Filing Classification:", f"BIR Form 2316: {emp['tax_status']}")
         ])
 
         # 4. Leave Balances & Compliance Vault
         make_section("4. LEAVE BALANCES & COMPLIANCE VAULT", [
             ("Available PTO Vacation:", f"{emp['pto_balance']} Days Remaining"),
             ("Paid Sick Leave Balance:", "8 Days Remaining"),
-            ("Form W-4 Withholding Status:", "✓ Verified & On File"),
-            ("Form I-9 Employment Eligibility:", "✓ Verified & Authorized")
+            ("BIR Form 2316 / 1902 Status:", "✓ Verified & On File"),
+            ("DOLE & Statutory Mandates:", "✓ SSS, PhilHealth, Pag-IBIG Verified")
         ])
 
         # Footer Actions
@@ -1006,56 +1054,325 @@ class SteadypayEmployeePage(tk.Tk):
             command=lambda: self.edit_employee_profile_modal(emp, modal)
         ).pack(side="right", padx=(0, 8))
 
+    def request_offboarding_approval(self, emp):
+        """Opens a styled message bubble dialog for Standard Admin to input departure reason and request authorization."""
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Request Offboarding: {emp['name']}")
+        dialog.geometry("490x510")
+        dialog.resizable(False, False)
+        dialog.configure(bg=self.colors["white"])
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Top Ribbon Banner
+        hdr = tk.Frame(dialog, bg="#FFF9F2", padx=20, pady=14, highlightbackground=self.colors["border_peach"], highlightthickness=1)
+        hdr.pack(fill="x")
+
+        tk.Label(
+            hdr,
+            text="OFFBOARDING AUTHORIZATION REQUEST",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.colors["primary_orange"],
+            bg="#FFF9F2"
+        ).pack(anchor="w")
+
+        tk.Label(
+            hdr,
+            text=f"Request Departure: {emp['name']}",
+            font=("Segoe UI", 12, "bold"),
+            fg=self.colors["dark_teal"],
+            bg="#FFF9F2"
+        ).pack(anchor="w", pady=(2, 2))
+
+        # Employee metadata chip row
+        meta_row = tk.Frame(hdr, bg="#FFF9F2")
+        meta_row.pack(fill="x", pady=(2, 0))
+
+        tk.Label(
+            meta_row,
+            text=f"ID: {emp['id']}  •  Role: {emp['role']}  •  Dept: {emp['dept']}",
+            font=("Segoe UI", 7),
+            fg=self.colors["gray_text"],
+            bg="#FFF9F2"
+        ).pack(side="left")
+
+        # Dialog Body
+        body = tk.Frame(dialog, bg=self.colors["white"], padx=20, pady=14)
+        body.pack(fill="both", expand=True)
+
+        tk.Label(
+            body,
+            text="Standard Admins must provide departure details for Super Admin review and sign-off.",
+            font=("Segoe UI", 8),
+            fg=self.colors["text_dark"],
+            bg=self.colors["white"]
+        ).pack(anchor="w", pady=(0, 10))
+
+        # Category Selector Row
+        cat_frame = tk.Frame(body, bg=self.colors["white"])
+        cat_frame.pack(fill="x", pady=(0, 10))
+
+        tk.Label(
+            cat_frame,
+            text="Departure Category:",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.colors["dark_teal"],
+            bg=self.colors["white"]
+        ).pack(anchor="w", pady=(0, 4))
+
+        categories = [
+            "Voluntary Resignation",
+            "Contract Completed",
+            "Performance / Disciplinary",
+            "Relocation / Retirement",
+            "Mutual Separation",
+            "Other / Unspecified"
+        ]
+        cat_cb = ttk.Combobox(cat_frame, values=categories, state="readonly", font=("Segoe UI", 9))
+
+        existing_req = emp.get("offboard_request", {})
+        if existing_req and existing_req.get("category") in categories:
+            cat_cb.set(existing_req.get("category"))
+        else:
+            cat_cb.set(categories[0])
+        cat_cb.pack(fill="x")
+
+        # Message Bubble Container (Chat/Speech Bubble styling)
+        bubble_outer = tk.Frame(body, bg=self.colors["white"])
+        bubble_outer.pack(fill="both", expand=True, pady=(6, 10))
+
+        # Sender identity tag
+        sender_tag = tk.Frame(bubble_outer, bg=self.colors["white"])
+        sender_tag.pack(anchor="w", pady=(0, 4))
+
+        av = tk.Canvas(sender_tag, width=20, height=20, bg=self.colors["white"], highlightthickness=0)
+        av.pack(side="left", padx=(0, 6))
+        av.create_oval(1, 1, 19, 19, fill=self.colors["primary_orange"], outline="")
+        av.create_text(10, 10, text="AM", fill="#FFFFFF", font=("Segoe UI", 6, "bold"))
+
+        tk.Label(
+            sender_tag,
+            text=f"Reason Message Bubble • {self.admin_data['name']} (Standard Admin)",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.colors["dark_teal"],
+            bg=self.colors["white"]
+        ).pack(side="left")
+
+        # Speech Bubble Card with speech bubble header and inner text
+        bubble_card = tk.Frame(
+            bubble_outer,
+            bg="#F7FCFC",
+            highlightbackground="#CDEFEA",
+            highlightthickness=1,
+            padx=12,
+            pady=10
+        )
+        bubble_card.pack(fill="both", expand=True)
+
+        tk.Label(
+            bubble_card,
+            text="💬 Departure Rationale & Transition Handover Notes:",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.colors["deep_teal"],
+            bg="#F7FCFC"
+        ).pack(anchor="w", pady=(0, 6))
+
+        # Multi-line Text Area inside the message bubble
+        reason_txt = tk.Text(
+            bubble_card,
+            font=("Segoe UI", 9),
+            bg=self.colors["white"],
+            fg=self.colors["text_dark"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            relief="flat",
+            wrap="word",
+            height=4
+        )
+        reason_txt.pack(fill="both", expand=True, padx=2, pady=2)
+
+        placeholder_text = "e.g., Submitted two-week voluntary notice effective end of month. Handover files assigned to team lead."
+        if existing_req and existing_req.get("reason"):
+            reason_txt.insert("1.0", existing_req.get("reason"))
+        else:
+            reason_txt.insert("1.0", placeholder_text)
+            reason_txt.config(fg="#8E9DA4")
+
+            def _on_focus_in(event):
+                if reason_txt.get("1.0", "end-1c") == placeholder_text:
+                    reason_txt.delete("1.0", "end")
+                    reason_txt.config(fg=self.colors["text_dark"])
+
+            def _on_focus_out(event):
+                if not reason_txt.get("1.0", "end-1c").strip():
+                    reason_txt.insert("1.0", placeholder_text)
+                    reason_txt.config(fg="#8E9DA4")
+
+            reason_txt.bind("<FocusIn>", _on_focus_in)
+            reason_txt.bind("<FocusOut>", _on_focus_out)
+
+        # Audit notice caption
+        tk.Label(
+            body,
+            text="🔒 Message reason will be logged into the audit ledger and sent to Super Admin.",
+            font=("Segoe UI", 7),
+            fg=self.colors["gray_text"],
+            bg=self.colors["white"]
+        ).pack(anchor="w")
+
+        # Footer Actions
+        footer = tk.Frame(dialog, bg=self.colors["white"], padx=20, pady=12, highlightbackground=self.colors["border_light"], highlightthickness=1)
+        footer.pack(fill="x", side="bottom")
+
+        def _submit_request():
+            raw_text = reason_txt.get("1.0", "end-1c").strip()
+            if not raw_text or raw_text == placeholder_text:
+                messagebox.showwarning(
+                    "Reason Required",
+                    "Please input a valid explanation in the message bubble before submitting the offboarding request.",
+                    parent=dialog
+                )
+                reason_txt.focus_set()
+                return
+
+            chosen_cat = cat_cb.get() or "Voluntary Resignation"
+            timestamp_str = datetime.datetime.now().strftime("%B %d, %Y at %I:%M %p")
+
+            # Persist in employee record
+            emp["offboard_request"] = {
+                "category": chosen_cat,
+                "reason": raw_text,
+                "requested_by": self.admin_data["name"],
+                "timestamp": timestamp_str,
+                "status": "Pending Super Admin Authorization"
+            }
+
+            dialog.destroy()
+            self.render_table_rows()
+
+            messagebox.showinfo(
+                "Offboarding Request Submitted 📨",
+                f"✓ Departure request for {emp['name']} ({emp['id']}) has been officially queued for Super Admin authorization!\n\n"
+                f"• Category: {chosen_cat}\n"
+                f"• Reason: \"{raw_text}\"\n"
+                f"• Submitted: {timestamp_str}\n\n"
+                f"Employee status indicator updated to 'Req Pending ⏳'.",
+                parent=self
+            )
+
+        cancel_btn = tk.Button(
+            footer,
+            text="Cancel",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.colors["sidebar_bg"],
+            fg=self.colors["dark_teal"],
+            activebackground=self.colors["border_peach"],
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            padx=14,
+            pady=6,
+            command=dialog.destroy
+        )
+        cancel_btn.pack(side="right", padx=(8, 0))
+
+        submit_btn = tk.Button(
+            footer,
+            text="Submit Offboarding Request 📨",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.colors["primary_orange"],
+            fg=self.colors["white"],
+            activebackground=self.colors["soft_orange"],
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            padx=16,
+            pady=6,
+            command=_submit_request
+        )
+        submit_btn.pack(side="right")
+
     def edit_employee_profile_modal(self, emp, parent_modal):
-        """Allows administrator to update compensation, title, and department."""
+        """Allows administrator to update profile information. Standard Admins are blocked from Base Salary, Bank, and BIR Tax status."""
         dialog = tk.Toplevel(parent_modal)
         dialog.title(f"Edit Profile: {emp['name']}")
-        dialog.geometry("400x420")
+        dialog.geometry("420x460")
         dialog.resizable(False, False)
         dialog.configure(bg=self.colors["white"])
         dialog.transient(parent_modal)
         dialog.grab_set()
 
-        tk.Label(dialog, text=f"Update Master Profile: {emp['name']}", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(padx=20, pady=(16, 10), anchor="w")
+        tk.Label(dialog, text=f"Update Master Profile: {emp['name']}", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(padx=20, pady=(16, 6), anchor="w")
+
+        is_super = self.user.has_role(Role.SUPER_ADMIN)
+        if not is_super:
+            note_frame = tk.Frame(dialog, bg="#FFF8F0", highlightbackground=self.colors["soft_orange"], highlightthickness=1, padx=8, pady=4)
+            note_frame.pack(fill="x", padx=20, pady=(0, 8))
+            tk.Label(note_frame, text="🔒 Standard Admin Mode: Salary, Bank & BIR Tax Status are locked.", font=("Segoe UI", 7, "bold"), fg=self.colors["pill_pending_text"], bg="#FFF8F0").pack(anchor="w")
 
         entries = {}
-        fields = [
-            ("Position / Role Title", "role", emp["role"]),
-            ("Department", "dept", emp["dept"]),
-            ("Monthly Base Salary ($)", "salary", str(emp["salary"])),
-            ("Work Contact Phone", "phone", emp["phone"]),
-            ("Tax Filing Status", "tax_status", emp["tax_status"])
-        ]
+        if is_super:
+            fields = [
+                ("Position / Role Title", "role", emp["role"], True),
+                ("Department", "dept", emp["dept"], True),
+                ("Monthly Base Salary ($)", "salary", str(emp["salary"]), True),
+                ("Work Contact Phone", "phone", emp["phone"], True),
+                ("BIR Tax Filing Status", "tax_status", emp["tax_status"], True)
+            ]
+        else:
+            fields = [
+                ("Position / Role Title", "role", emp["role"], True),
+                ("Department", "dept", emp["dept"], True),
+                ("Work Contact Phone", "phone", emp["phone"], True),
+                ("Monthly Base Salary ($)", "salary", f"${emp['salary']:,.2f} (Super Admin Protected)", False),
+                ("Direct Deposit Bank Account", "bank", f"{emp.get('bank_account', '****4821')} (Super Admin Protected)", False),
+                ("BIR Tax Filing Classification", "tax_status", f"{emp['tax_status']} (Super Admin Protected)", False)
+            ]
 
-        for label, key, val in fields:
-            tk.Label(dialog, text=label, font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(padx=20, anchor="w", pady=(4, 1))
-            ent = tk.Entry(dialog, font=("Segoe UI", 9))
-            ent.insert(0, val)
-            ent.pack(fill="x", padx=20, pady=(0, 4))
-            entries[key] = ent
+        for label, key, val, editable in fields:
+            tk.Label(dialog, text=label, font=("Segoe UI", 8, "bold"), fg=self.colors["text_dark"] if editable else self.colors["gray_text"], bg=self.colors["white"]).pack(padx=20, anchor="w", pady=(3, 1))
+            if editable:
+                ent = tk.Entry(dialog, font=("Segoe UI", 9), bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1, bd=0)
+                ent.insert(0, val)
+                ent.pack(fill="x", padx=20, pady=(0, 4), ipady=3)
+                entries[key] = ent
+            else:
+                lbl = tk.Label(dialog, text=f"🔒 {val}", font=("Segoe UI", 8), fg=self.colors["gray_text"], bg="#F8FBFB", anchor="w", padx=8, pady=4, highlightbackground=self.colors["border_light"], highlightthickness=1)
+                lbl.pack(fill="x", padx=20, pady=(0, 4))
 
         def _save():
-            try:
-                emp["role"] = entries["role"].get().strip()
-                emp["dept"] = entries["dept"].get().strip()
-                emp["salary"] = float(entries["salary"].get().strip())
-                emp["phone"] = entries["phone"].get().strip()
-                emp["tax_status"] = entries["tax_status"].get().strip()
+            emp["role"] = entries["role"].get().strip()
+            emp["dept"] = entries["dept"].get().strip()
+            emp["phone"] = entries["phone"].get().strip()
 
-                dialog.destroy()
-                parent_modal.destroy()
-                self.update_workforce_stats()
-                self.render_table_rows()
-                messagebox.showinfo("Profile Updated", f"Master record for {emp['name']} updated successfully!", parent=self)
-            except ValueError:
-                messagebox.showerror("Invalid Input", "Please enter a valid numeric salary.", parent=dialog)
+            if is_super and "salary" in entries:
+                try:
+                    emp["salary"] = float(entries["salary"].get().strip())
+                    emp["tax_status"] = entries["tax_status"].get().strip()
+                except ValueError:
+                    messagebox.showerror("Invalid Input", "Please enter a valid numeric salary.", parent=dialog)
+                    return
 
-        tk.Button(dialog, text="Save Changes", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=14, pady=6, command=_save).pack(padx=20, pady=(12, 0), anchor="e")
+            dialog.destroy()
+            parent_modal.destroy()
+            self.update_workforce_stats()
+            self.render_table_rows()
+            messagebox.showinfo("Profile Updated", f"Master record for {emp['name']} updated successfully!", parent=self)
+
+        tk.Button(dialog, text="Save Changes", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=14, pady=6, command=_save).pack(padx=20, pady=(10, 0), anchor="e")
 
     # =========================================================================
     # EMPLOYEE ONBOARDING WORKFLOW (NEW HIRE WIZARD)
     # =========================================================================
     def show_onboard_employee_wizard(self):
+        """Onboarding wizard modal to register new hires into the company directory."""
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Permission Denied",
+                "Access Denied: Standard Admins do not have permission to onboard new employees.\n\nSuper Admin authorization is required to create employee master records.",
+                parent=self
+            )
+            return
         """Onboarding wizard modal to register new hires into the company directory."""
         wizard = tk.Toplevel(self)
         wizard.title("New Employee Onboarding Wizard")
@@ -1090,7 +1407,7 @@ class SteadypayEmployeePage(tk.Tk):
             ("Monthly Base Salary ($)", "salary", "4000.00"),
             ("Corporate Work Email", "email", ""),
             ("Direct Deposit Bank Account", "bank", "****4589"),
-            ("W-4 Tax Filing Status", "tax_status", "Single (0)")
+            ("BIR Tax Status (Form 2316/1902)", "tax_status", "Single (BIR Form 2316)")
         ]
 
         for label, key, default in fields:
@@ -1147,7 +1464,7 @@ class SteadypayEmployeePage(tk.Tk):
                 "initials": initials,
                 "emergency_contact": "Emergency Contact On File",
                 "i9_verified": True,
-                "w4_verified": True
+                "bir_2316_verified": True
             }
 
             self.employees.append(new_record)
@@ -1167,9 +1484,17 @@ class SteadypayEmployeePage(tk.Tk):
     # =========================================================================
     def show_offboarding_modal(self, emp):
         """Formal offboarding protocol modal to safely transition employee status."""
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Permission Denied",
+                "Access Denied: Standard Admins do not have authorization to execute employee offboardings.\n\nPlease submit an Offboarding Approval Request instead.",
+                parent=self
+            )
+            return
+
         modal = tk.Toplevel(self)
         modal.title(f"Offboard Employee: {emp['name']}")
-        modal.geometry("450x420")
+        modal.geometry("460x490")
         modal.resizable(False, False)
         modal.configure(bg=self.colors["white"])
         modal.transient(self)
@@ -1182,6 +1507,14 @@ class SteadypayEmployeePage(tk.Tk):
 
         body = tk.Frame(modal, bg=self.colors["white"], padx=20, pady=14)
         body.pack(fill="both", expand=True)
+
+        if emp.get("offboard_request"):
+            req_info = emp["offboard_request"]
+            req_card = tk.Frame(body, bg="#FFF9F2", highlightbackground=self.colors["border_peach"], highlightthickness=1, padx=10, pady=8)
+            req_card.pack(fill="x", pady=(0, 10))
+            tk.Label(req_card, text=f"💬 Standard Admin Departure Note ({req_info.get('category', 'Resignation')}):", font=("Segoe UI", 8, "bold"), fg=self.colors["primary_orange"], bg="#FFF9F2").pack(anchor="w")
+            tk.Label(req_card, text=f"\"{req_info.get('reason', '')}\"", font=("Segoe UI", 8, "italic"), fg=self.colors["text_dark"], bg="#FFF9F2").pack(anchor="w", pady=(2, 2))
+            tk.Label(req_card, text=f"Submitted by {req_info.get('requested_by', 'Admin')} on {req_info.get('timestamp', '')}", font=("Segoe UI", 7), fg=self.colors["gray_text"], bg="#FFF9F2").pack(anchor="w")
 
         tk.Label(body, text="Mandatory Offboarding Audit Checklist:", font=("Segoe UI", 8, "bold"), fg=self.colors["text_dark"], bg=self.colors["white"]).pack(anchor="w", pady=(0, 8))
 
@@ -1238,11 +1571,11 @@ class SteadypayEmployeePage(tk.Tk):
         body.pack(fill="both", expand=True)
 
         records = [
-            ("IRS Form W-4 Withholding Certificates", "100% Verified", "All employee tax withholding forms validated for 2026 tax year."),
-            ("USCIS Form I-9 Employment Eligibility", "100% Authorized", "Identity and legal employment authorizations on digital file."),
+            ("BIR Form 2316 Withholding Certificates", "100% Verified", "All employee compensation tax withholding certificates validated under TRAIN Law."),
+            ("DOLE & Statutory Mandates Vault", "100% Authorized", "SSS, PhilHealth, and Pag-IBIG statutory registrations active and on digital file."),
             ("Direct Deposit EFT Authorizations", "100% Active", "Bank routing and account confirmations on secure record."),
             ("Company Policy & Confidentiality NDA", "Completed", "Annual ethics, data privacy, and security training signed."),
-            ("OSHA & Department of Labor Postings", "Current", "Required digital workplace rights and fair wage notices distributed.")
+            ("DOLE General Labor Standards & Wage Postings", "Current", "Required DOLE workplace rights, safety, and wage order notices distributed.")
         ]
 
         for title, status, sub in records:
@@ -1283,7 +1616,7 @@ class SteadypayEmployeePage(tk.Tk):
                 writer.writerow([
                     "Employee ID", "Full Name", "Position Title", "Department",
                     "Monthly Salary ($)", "Employment Status", "Work Email", "Phone",
-                    "Hire Date", "Employment Type", "Bank Account", "W-4 Filing", "PTO Balance"
+                    "Hire Date", "Employment Type", "Bank Account", "BIR Form 2316", "PTO Balance"
                 ])
 
                 for emp in self.employees:
@@ -1301,17 +1634,24 @@ class SteadypayEmployeePage(tk.Tk):
     # NAVIGATION & LOGOUT HANDLERS
     # ==========================================
     def navigate_to_dashboard(self):
+        if self.controller:
+            self.controller.show_page("dashboard")
+            return
         self.destroy()
         dashboard_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aDashboard.py")
         if os.path.exists(dashboard_script):
             subprocess.Popen([sys.executable, dashboard_script])
 
     def handle_logout(self):
+        if self.controller:
+            self.controller.handle_logout()
+            return
         self.destroy()
         login_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login.py")
         if os.path.exists(login_script):
             subprocess.Popen([sys.executable, login_script])
 
 if __name__ == "__main__":
-    app = SteadypayEmployeePage()
+    from aDashboard import SteadypayAdminDashboard
+    app = SteadypayAdminDashboard(initial_page="employee")
     app.mainloop()

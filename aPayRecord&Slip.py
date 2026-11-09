@@ -7,17 +7,66 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from data import (
     get_admin_data, get_all_employees,
-    draw_rounded_rectangle, RoundedBadge
+    draw_rounded_rectangle, RoundedBadge,
+    Role, get_current_user
 )
 
-class SteadypayPayrollPayslipsPage(tk.Tk):
-    def __init__(self):
-        super().__init__()
+class ToolTip:
+    """Lightweight tooltip widget for displaying helpful role and status context."""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
 
-        self.title("Steadypay - Payroll & Payslips (Admin)")
-        self.geometry("1240x780")
-        self.minsize(1120, 680)
-        self.configure(bg="#FFFFFF")
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 20
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+            self.tip_window = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(
+                tw,
+                text=self.text,
+                justify="left",
+                background="#2C3E50",
+                foreground="#FFFFFF",
+                relief="flat",
+                font=("Segoe UI", 8),
+                padx=8,
+                pady=4
+            )
+            label.pack()
+        except Exception:
+            pass
+
+    def hide_tip(self, event=None):
+        if self.tip_window:
+            try:
+                self.tip_window.destroy()
+            except Exception:
+                pass
+            self.tip_window = None
+
+class SteadypayPayrollPayslipsPage(tk.Frame):
+    def __init__(self, parent=None, controller=None):
+        if parent is None:
+            self.root = tk.Tk()
+            self.root.title("Steadypay - Payroll & Payslips")
+            self.root.geometry("1240x780")
+            self.root.minsize(1120, 680)
+            self.root.configure(bg="#FFFFFF")
+            super().__init__(self.root, bg="#FFFFFF")
+            self.pack(fill="both", expand=True)
+            self.controller = controller
+        else:
+            self.root = parent.winfo_toplevel()
+            super().__init__(parent, bg="#FFFFFF")
+            self.controller = controller
 
         # Color Palette Definition (Based on Steadypay visual design)
         self.colors = {
@@ -46,20 +95,14 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
 
         # Centralized Admin Data
         self.admin_data = get_admin_data()
+        self.user = get_current_user()
 
-        # Pay Period State
-        self.pay_periods = [
-            "Sep 16 - Sep 30, 2026 (Current)",
-            "Sep 01 - Sep 15, 2026",
-            "Aug 16 - Aug 31, 2026",
-            "Aug 01 - Aug 15, 2026"
-        ]
-        self.current_period_var = tk.StringVar(value=self.pay_periods[0])
+        # Fixed Pay Period State
+        self.pay_period = "Sep 16 - Sep 30, 2026"
+        self.pay_periods = [self.pay_period]
+        self.current_period_var = tk.StringVar(value=self.pay_period)
         self.period_status_map = {
-            "Sep 16 - Sep 30, 2026 (Current)": "Approved & Locked",
-            "Sep 01 - Sep 15, 2026": "Approved & Locked",
-            "Aug 16 - Aug 31, 2026": "Approved & Locked",
-            "Aug 01 - Aug 15, 2026": "Approved & Locked"
+            self.pay_period: "Active"
         }
 
         # Initial Master Employee Payroll Records
@@ -68,6 +111,7 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         # Search, Filter and Sort variables
         self._search_placeholder = "Search employee, ID, or role..."
         self.search_var = tk.StringVar(value="")
+        self.status_filter_var = tk.StringVar(value="All Statuses")
         self.dept_filter_var = tk.StringVar(value="All Departments")
         self.sort_var = tk.StringVar(value="Employee ID")
 
@@ -118,9 +162,10 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         """Computes gross pay, taxes, benefit deductions, and net pay."""
         gross_pay = base + overtime
 
-        # Taxes: Federal/State Income Tax (approx 10.5%), FICA Social Security & Medicare (7.65%)
+        # Philippine Statutory Taxes & Deductions:
+        # BIR Withholding Tax (TRAIN Law RA 10963: approx 10.5%), SSS (4.5%), PhilHealth & Pag-IBIG (~3.15%)
         tax_withholding = round(gross_pay * 0.1815, 2)
-        # Benefits: Health Insurance contribution + 401(k) retirement (approx 4.5%)
+        # Statutory & Mandatory Contributions: SSS, PhilHealth & Pag-IBIG (approx 4.5%)
         benefits = round(gross_pay * 0.045, 2)
         total_deductions = round(tax_withholding + benefits, 2)
         net_pay = round(gross_pay - total_deductions, 2)
@@ -146,23 +191,8 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         }
 
     def recalculate_all_payroll(self):
-        """Action handler to re-compute payroll across all employees for the selected period."""
+        """Re-computes payroll across all employees for the current period."""
         current_period = self.current_period_var.get()
-        is_locked = self.period_status_map.get(current_period, "Draft") == "Approved & Locked"
-
-        if is_locked:
-            confirm = messagebox.askyesno(
-                "Period Locked",
-                f"The pay period '{current_period}' is currently Approved & Locked.\n\n"
-                "Do you want to temporarily unlock it to recalculate gross pay, overtime, and tax withholdings?",
-                parent=self
-            )
-            if not confirm:
-                return
-            self.period_status_map[current_period] = "Pending Approval"
-            self.update_period_status_ui()
-
-        # Perform recalculated variance based on chosen period
         factor = 1.0
         if "Sep 01" in current_period:
             factor = 0.98
@@ -202,11 +232,11 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
     # LAYOUT SETUP
     # ==========================================
     def setup_layout(self):
-        # 1. Left Fixed Sidebar
-        self.create_sidebar()
-
-        # 2. Right Main Scrollable Area
-        self.create_scrollable_main_content()
+        if self.controller is None:
+            self.create_sidebar()
+            self.create_scrollable_main_content()
+        else:
+            self.create_scrollable_main_content(parent=self)
 
     # ==========================================
     # SIDEBAR NAVIGATION
@@ -243,7 +273,7 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         # Navigation Menu List
         menu_items = [
             ("🏠", "Dashboard", False),
-            ("👥", "Employee\nmanagement", False),
+            ("👥", "Workforce\nDirectory", False),
             ("💳", "Process payroll", False),
             ("📄", "Payroll &\nPayslips", True),
             ("⚙️", "Settings", False)
@@ -313,12 +343,24 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
             widget.bind("<Button-1>", lambda e: self.handle_logout())
 
     def on_menu_click(self, menu_name):
+        menu_to_page = {
+            "Dashboard": "dashboard",
+            "Workforce\nDirectory": "employee",
+            "Process payroll": "process_pay",
+            "Payroll &\nPayslips": "pay_records_slips",
+            "Settings": "settings"
+        }
+        if self.controller:
+            page = menu_to_page.get(menu_name, "dashboard")
+            self.controller.show_page(page)
+            return
+
         if menu_name == "Dashboard":
             self.navigate_to_dashboard()
             return
 
         menu_map = {
-            "Employee\nmanagement": "aEmployee.py",
+            "Workforce\nDirectory": "aEmployee.py",
             "Process payroll": "aProcessPay.py",
             "Payroll &\nPayslips": "aPayRecord&Slip.py",
             "Settings": "aSettings.py"
@@ -333,9 +375,12 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
     # ==========================================
     # SCROLLABLE MAIN CONTENT AREA
     # ==========================================
-    def create_scrollable_main_content(self):
-        right_container = tk.Frame(self, bg=self.colors["white"])
-        right_container.pack(side="right", fill="both", expand=True)
+    def create_scrollable_main_content(self, parent=None):
+        if parent is None:
+            right_container = tk.Frame(self, bg=self.colors["white"])
+            right_container.pack(side="right", fill="both", expand=True)
+        else:
+            right_container = parent
 
         # Fixed top header outside canvas
         self.create_top_header(right_container)
@@ -360,15 +405,25 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         self.main_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.main_canvas.bind("<MouseWheel>", self._on_mousewheel)
 
         # Populate Sections
         self.create_period_control_bar(self.content_frame)
         self.create_financial_summary_cards(self.content_frame)
         self.create_export_actions_bar(self.content_frame)
         self.create_master_ledger_table(self.content_frame)
+
+    def _on_mousewheel(self, event):
+        if hasattr(self, "main_canvas") and self.main_canvas.winfo_exists():
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_show(self):
+        """Called whenever this tab is brought into view."""
+        if hasattr(self, "main_canvas"):
+            self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        if hasattr(self, "table_grid") and hasattr(self, "render_table_rows"):
+            self.render_table_rows()
+            self.update_financial_summary_cards()
 
     # ==========================================
     # TOP HEADER (FIXED)
@@ -450,14 +505,14 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
 
         tk.Label(
             profile_info,
-            text=self.admin_data["role"],
+            text=f"{self.user.role_title}" if self.user.is_standard_admin() else self.admin_data["role"],
             font=("Segoe UI", 7),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
         ).pack(anchor="w")
 
     # ==========================================
-    # SECTION 1: PAY PERIOD CONTROL & LOCK BADGE
+    # SECTION 1: PAY PERIOD DISPLAY
     # ==========================================
     def create_period_control_bar(self, parent):
         period_card = tk.Frame(
@@ -470,7 +525,7 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         )
         period_card.pack(fill="x", pady=(0, 14))
 
-        # Left Group: Pay Period Label + Combobox
+        # Left Group: Pay Period Label + Fixed Period Badge
         left_ctrl = tk.Frame(period_card, bg=self.colors["white"])
         left_ctrl.pack(side="left", fill="y")
 
@@ -482,133 +537,42 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
             bg=self.colors["white"]
         ).pack(side="left", padx=(0, 8))
 
-        self.period_dropdown = ttk.Combobox(
+        period_badge = RoundedBadge(
             left_ctrl,
-            textvariable=self.current_period_var,
-            values=self.pay_periods,
-            state="readonly",
-            width=28,
-            font=("Segoe UI", 9)
+            text=self.current_period_var.get(),
+            bg_color=self.colors["sidebar_bg"],
+            fg_color=self.colors["dark_teal"],
+            radius=6,
+            font=("Segoe UI", 8, "bold"),
+            width=180,
+            height=24,
+            parent_bg=self.colors["white"]
         )
-        self.period_dropdown.pack(side="left", padx=(0, 14))
-        self.period_dropdown.bind("<<ComboboxSelected>>", self.on_period_changed)
+        period_badge.pack(side="left")
 
-        # Recalculate CTA button
-        recalc_btn = tk.Button(
-            left_ctrl,
-            text="Run & Recalculate Payroll  ⚡",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.colors["primary_orange"],
-            fg=self.colors["white"],
-            activebackground=self.colors["soft_orange"],
-            activeforeground=self.colors["white"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=14,
-            pady=6,
-            command=self.recalculate_all_payroll
-        )
-        recalc_btn.pack(side="left")
-
-        # Right Group: Status Badge + Period Lock/Unlock Toggle
-        self.right_ctrl = tk.Frame(period_card, bg=self.colors["white"])
-        self.right_ctrl.pack(side="right")
+        # Right Group: Cycle Info
+        right_ctrl = tk.Frame(period_card, bg=self.colors["white"])
+        right_ctrl.pack(side="right")
 
         tk.Label(
-            self.right_ctrl,
-            text="Period Status:",
-            font=("Segoe UI", 8, "bold"),
+            right_ctrl,
+            text="Cycle Schedule: Bi-Monthly (16th - End of Month)",
+            font=("Segoe UI", 8),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
-        ).pack(side="left", padx=(0, 8))
-
-        self.period_badge_container = tk.Frame(self.right_ctrl, bg=self.colors["white"])
-        self.period_badge_container.pack(side="left", padx=(0, 10))
-
-        self.lock_toggle_btn = tk.Button(
-            self.right_ctrl,
-            text="Unlock Period",
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["sidebar_bg"],
-            fg=self.colors["dark_teal"],
-            activebackground=self.colors["border_peach"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            pady=5,
-            command=self.toggle_period_lock
-        )
-        self.lock_toggle_btn.pack(side="left")
-
-        self.update_period_status_ui()
+        ).pack(side="right")
 
     def update_period_status_ui(self):
-        """Refreshes the period lock badge and toggle button text."""
-        for c in self.period_badge_container.winfo_children():
-            c.destroy()
-
-        current_period = self.current_period_var.get()
-        status = self.period_status_map.get(current_period, "Approved & Locked")
-
-        if status == "Approved & Locked":
-            badge = RoundedBadge(
-                self.period_badge_container,
-                text="🔒 Approved & Locked",
-                bg_color=self.colors["pill_approved"],
-                fg_color=self.colors["pill_approved_text"],
-                radius=8,
-                width=135,
-                height=24,
-                parent_bg=self.colors["white"]
-            )
-            self.lock_toggle_btn.config(text="Unlock to Edit 🔓", bg=self.colors["sidebar_bg"], fg=self.colors["dark_teal"])
-        elif status == "Pending Approval":
-            badge = RoundedBadge(
-                self.period_badge_container,
-                text="⏳ Pending Approval",
-                bg_color=self.colors["pill_pending"],
-                fg_color=self.colors["pill_pending_text"],
-                radius=8,
-                width=135,
-                height=24,
-                parent_bg=self.colors["white"]
-            )
-            self.lock_toggle_btn.config(text="Approve & Lock 🔒", bg=self.colors["primary_orange"], fg=self.colors["white"])
-        else:
-            badge = RoundedBadge(
-                self.period_badge_container,
-                text="📝 Draft",
-                bg_color=self.colors["pill_draft"],
-                fg_color=self.colors["pill_draft_text"],
-                radius=8,
-                width=100,
-                height=24,
-                parent_bg=self.colors["white"]
-            )
-            self.lock_toggle_btn.config(text="Submit for Approval", bg=self.colors["primary_orange"], fg=self.colors["white"])
-
-        badge.pack(side="left")
+        """No-op retained for backwards compatibility."""
+        pass
 
     def toggle_period_lock(self):
-        """Toggles between locked and editable period status."""
-        current_period = self.current_period_var.get()
-        current_status = self.period_status_map.get(current_period, "Approved & Locked")
-
-        if current_status == "Approved & Locked":
-            self.period_status_map[current_period] = "Pending Approval"
-            messagebox.showinfo("Period Unlocked", f"Period '{current_period}' unlocked.\nEdits and payroll adjustments are now permitted.", parent=self)
-        else:
-            self.period_status_map[current_period] = "Approved & Locked"
-            messagebox.showinfo("Period Approved & Locked", f"Period '{current_period}' has been Approved & Locked.\nAccidental changes are now prevented.", parent=self)
-
-        self.update_period_status_ui()
+        """No-op retained for backwards compatibility."""
+        pass
 
     def on_period_changed(self, event=None):
-        self.update_period_status_ui()
-        self.update_financial_summary_cards()
-        self.render_table_rows()
+        """No-op retained for backwards compatibility."""
+        pass
 
     # ==========================================
     # SECTION 2: FINANCIAL SUMMARY CARDS
@@ -745,21 +709,6 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
             command=self.action_export_csv_register
         ).pack(side="left", padx=(0, 8))
 
-        # 4. Bank Transfer File Exporter (ACH/NACHA)
-        tk.Button(
-            export_card,
-            text="🏦 Bank Transfer (ACH / NACHA)",
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["primary_orange"],
-            fg=self.colors["white"],
-            activebackground=self.colors["soft_orange"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            pady=5,
-            command=self.action_export_ach_nacha
-        ).pack(side="right")
 
     # ==========================================
     # SECTION 4: MASTER PAYROLL LEDGER (TABLE)
@@ -798,7 +747,7 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
             bg=self.colors["white"]
         ).pack(anchor="w")
 
-        # Right Side: Search Box + Dept Filter + Sort
+        # Right Side: Search Box + Status Filter + Dept Filter + Sort
         right_hdr = tk.Frame(card_hdr, bg=self.colors["white"])
         right_hdr.pack(side="right")
 
@@ -809,11 +758,24 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
             textvariable=self.sort_var,
             values=["Employee ID", "Name (A-Z)", "Net Pay (High-Low)", "Base Salary (High-Low)"],
             state="readonly",
-            width=16,
+            width=14,
             font=("Segoe UI", 8)
         )
         sort_cb.pack(side="left", padx=(0, 8))
         sort_cb.bind("<<ComboboxSelected>>", lambda e: self.render_table_rows())
+
+        # Status Dropdown
+        tk.Label(right_hdr, text="Status:", font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="left", padx=(0, 4))
+        status_cb = ttk.Combobox(
+            right_hdr,
+            textvariable=self.status_filter_var,
+            values=["All Statuses", "Paid", "Pending"],
+            state="readonly",
+            width=11,
+            font=("Segoe UI", 8)
+        )
+        status_cb.pack(side="left", padx=(0, 8))
+        status_cb.bind("<<ComboboxSelected>>", lambda e: self.render_table_rows())
 
         # Dept Dropdown
         tk.Label(right_hdr, text="Dept:", font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(side="left", padx=(0, 4))
@@ -823,13 +785,13 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
             textvariable=self.dept_filter_var,
             values=departments,
             state="readonly",
-            width=15,
+            width=13,
             font=("Segoe UI", 8)
         )
         dept_cb.pack(side="left", padx=(0, 8))
         dept_cb.bind("<<ComboboxSelected>>", lambda e: self.render_table_rows())
 
-        # Search Entry
+        # Search Entry with Icon
         search_frame = tk.Frame(
             right_hdr,
             bg=self.colors["white"],
@@ -838,43 +800,39 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         )
         search_frame.pack(side="left")
 
+        tk.Label(search_frame, text="🔍", font=("Segoe UI", 8), bg=self.colors["white"], fg=self.colors["gray_text"]).pack(side="left", padx=(4, 2))
+
         self.search_entry = tk.Entry(
             search_frame,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 8),
             bg=self.colors["white"],
             bd=0,
             relief="flat",
-            width=22,
+            width=20,
             fg=self.colors["gray_text"]
         )
         self.search_entry.insert(0, self._search_placeholder)
-        self.search_entry.pack(side="left", ipady=4, padx=8)
+        self.search_entry.pack(side="left", ipady=3, padx=(2, 6))
 
         def _search_in(e):
             if self.search_entry.get() == self._search_placeholder:
                 self.search_entry.delete(0, tk.END)
                 self.search_entry.config(fg=self.colors["text_dark"])
-                self.search_var.set("")
 
         def _search_out(e):
             if not self.search_entry.get().strip():
-                self.search_entry.config(fg=self.colors["gray_text"])
                 self.search_entry.delete(0, tk.END)
                 self.search_entry.insert(0, self._search_placeholder)
-                self.search_var.set("")
-            else:
-                self.search_var.set(self.search_entry.get().strip())
+                self.search_entry.config(fg=self.colors["gray_text"])
             self.render_table_rows()
 
         def _search_key(e):
-            val = self.search_entry.get()
-            if val != self._search_placeholder:
-                self.search_var.set(val)
-                self.render_table_rows()
+            self.render_table_rows()
 
         self.search_entry.bind("<FocusIn>", _search_in)
         self.search_entry.bind("<FocusOut>", _search_out)
         self.search_entry.bind("<KeyRelease>", _search_key)
+        self.search_entry.bind("<Return>", lambda e: self.render_table_rows())
 
         # Multi-Column Specs: (Name, weight, anchor)
         self.col_specs = [
@@ -898,37 +856,58 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         self.render_table_rows()
 
     def get_filtered_and_sorted_records(self):
-        """Applies Search, Department Filter, and Sorting criteria."""
-        query = self.search_var.get().lower().strip()
-        dept = self.dept_filter_var.get()
-        sort_by = self.sort_var.get()
+        """Applies Search, Department Filter, Status Filter, and Sorting criteria."""
+        # 1. Resolve search query directly from search_entry or search_var fallback
+        if hasattr(self, "search_entry"):
+            raw = self.search_entry.get().strip()
+            query = "" if raw == self._search_placeholder else raw.lower()
+        else:
+            query = self.search_var.get().strip().lower()
+            if query == self._search_placeholder.lower():
+                query = ""
+
+        dept = self.dept_filter_var.get() if hasattr(self, "dept_filter_var") else "All Departments"
+        status = self.status_filter_var.get() if hasattr(self, "status_filter_var") else "All Statuses"
+        sort_by = self.sort_var.get() if hasattr(self, "sort_var") else "Employee ID"
 
         res = []
         for r in self.payroll_records:
-            # Query match
-            if query and query != self._search_placeholder.lower():
-                matches = (query in r["id"].lower() or
-                           query in r["name"].lower() or
-                           query in r["role"].lower() or
-                           query in r["dept"].lower())
+            # Department filter
+            if dept and dept != "All Departments" and r.get("dept") != dept:
+                continue
+
+            # Status filter
+            if status and status != "All Statuses" and r.get("status") != status:
+                continue
+
+            # Search query matching (matches across ID, name, role, dept, email, status, and net pay / base salary)
+            if query:
+                net_str = f"{r.get('net_pay', 0):.2f}"
+                base_str = f"{r.get('base_salary', 0):.2f}"
+                matches = (
+                    query in r.get("id", "").lower() or
+                    query in r.get("name", "").lower() or
+                    query in r.get("role", "").lower() or
+                    query in r.get("dept", "").lower() or
+                    query in r.get("email", "").lower() or
+                    query in r.get("status", "").lower() or
+                    query in net_str or
+                    query in base_str
+                )
                 if not matches:
                     continue
-
-            # Dept match
-            if dept != "All Departments" and r["dept"] != dept:
-                continue
 
             res.append(r)
 
         # Sorting
         if sort_by == "Name (A-Z)":
-            res.sort(key=lambda x: x["name"])
+            res.sort(key=lambda x: x.get("name", "").lower())
         elif sort_by == "Net Pay (High-Low)":
-            res.sort(key=lambda x: x["net_pay"], reverse=True)
+            res.sort(key=lambda x: x.get("net_pay", 0.0), reverse=True)
         elif sort_by == "Base Salary (High-Low)":
-            res.sort(key=lambda x: x["base_salary"], reverse=True)
+            res.sort(key=lambda x: x.get("base_salary", 0.0), reverse=True)
         else: # Employee ID
-            res.sort(key=lambda x: x["id"])
+            res.sort(key=lambda x: x.get("id", ""))
 
         return res
 
@@ -1206,8 +1185,8 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         tk.Frame(ded_col, bg=self.colors["border_light"], height=1).pack(fill="x", pady=(3, 8))
 
         deduction_lines = [
-            ("Federal/State Withholding", f"${record['tax_withholding']:,.2f}"),
-            ("Benefits & 401(k)", f"${record['benefit_deductions']:,.2f}"),
+            ("BIR Withholding (TRAIN)", f"${record['tax_withholding']:,.2f}"),
+            ("SSS, PhilHealth & Pag-IBIG", f"${record['benefit_deductions']:,.2f}"),
             ("Total Deductions", f"-${record['total_deductions']:,.2f}")
         ]
         for item, val in deduction_lines:
@@ -1406,54 +1385,6 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
         except Exception as e:
             messagebox.showerror("Export Failed", f"Could not write CSV file:\n{str(e)}", parent=self)
 
-    def action_export_ach_nacha(self):
-        """Generates an automated clearing house (ACH / NACHA) direct deposit batch file."""
-        period = self.current_period_var.get()
-        default_filename = f"NACHA_ACH_DirectDeposit_{datetime.datetime.now().strftime('%Y%m%d')}.ach"
-
-        filepath = filedialog.asksaveasfilename(
-            parent=self,
-            title="Export NACHA Direct Deposit File",
-            defaultextension=".ach",
-            initialfile=default_filename,
-            filetypes=[("ACH NACHA File", "*.ach"), ("Text File", "*.txt"), ("All Files", "*.*")]
-        )
-
-        if not filepath:
-            return
-
-        try:
-            tot_net = sum(r["net_pay"] for r in self.payroll_records)
-            today_nacha = datetime.datetime.now().strftime("%y%m%d")
-
-            with open(filepath, mode="w", encoding="utf-8") as f:
-                # Standard File Header Record (Type 1)
-                f.write(f"101 121000358 111223344 {today_nacha} 1000 A 094 101 STEADYPAY CORP        CHASE BANK          \n")
-                # Company Batch Header Record (Type 5)
-                f.write(f"5200 STEADYPAY PAYROLL          111223344 PPD PAYROLL   {today_nacha} {today_nacha}   1 12100035 0000001\n")
-
-                # Entry Detail Records (Type 6)
-                for idx, r in enumerate(self.payroll_records, start=1):
-                    cents = int(round(r["net_pay"] * 100))
-                    name_padded = r["name"][:15].ljust(15)
-                    id_padded = r["id"][:15].ljust(15)
-                    f.write(f"622 12100035 8 9876543210      {cents:010d} {id_padded} {name_padded}  0 12100035{idx:07d}\n")
-
-                # Batch Control Record (Type 8)
-                f.write(f"8200 {len(self.payroll_records):06d} 0012100035 0000000000 {int(round(tot_net*100)):012d} 111223344                         12100035 0000001\n")
-                # File Control Record (Type 9)
-                f.write(f"9000001 000001 {len(self.payroll_records):08d} 0012100035 0000000000 {int(round(tot_net*100)):012d}                                       \n")
-
-            messagebox.showinfo(
-                "ACH Export Generated",
-                f"NACHA formatted bank file generated successfully!\n\n"
-                f"File: {filepath}\n"
-                f"Total Direct Deposit Batched: ${tot_net:,.2f}\n"
-                f"Record Count: {len(self.payroll_records)} Entries",
-                parent=self
-            )
-        except Exception as e:
-            messagebox.showerror("ACH Export Error", f"Could not create ACH file:\n{str(e)}", parent=self)
 
     def save_payslip_to_file(self, record, parent_window):
         """Saves a human-readable text/PDF payslip document."""
@@ -1493,14 +1424,14 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
                 f.write("-" * 60 + "\n")
                 f.write("WITHHOLDINGS & DEDUCTIONS\n")
                 f.write("-" * 60 + "\n")
-                f.write(f"  Federal / State Income Tax Withholding:  ${record['tax_withholding']:>12,.2f}\n")
-                f.write(f"  Health Insurance & Benefit 401(k):       ${record['benefit_deductions']:>12,.2f}\n")
+                f.write(f"  BIR Withholding Tax (TRAIN Law RA 10963): ${record['tax_withholding']:>12,.2f}\n")
+                f.write(f"  SSS, PhilHealth & Pag-IBIG Mandatory:     ${record['benefit_deductions']:>12,.2f}\n")
                 f.write(f"  TOTAL DEDUCTIONS:                       -${record['total_deductions']:>12,.2f}\n\n")
                 f.write("=" * 60 + "\n")
                 f.write(f"  NET TAKE-HOME PAY:                       ${record['net_pay']:>12,.2f}\n")
                 f.write("=" * 60 + "\n\n")
-                f.write("Notice: All statutory deductions are calculated under federal and state\n")
-                f.write("payroll guidelines. Please retain this statement for your financial records.\n")
+                f.write("Notice: All statutory deductions are calculated under Republic of the Philippines\n")
+                f.write("BIR (TRAIN Law), SSS, PhilHealth, and Pag-IBIG guidelines. Retain for your records.\n")
 
             messagebox.showinfo("Payslip Saved", f"Payslip statement saved successfully to:\n{filepath}", parent=parent_window)
         except Exception as e:
@@ -1510,17 +1441,24 @@ class SteadypayPayrollPayslipsPage(tk.Tk):
     # NAVIGATION & LOGOUT HANDLERS
     # ==========================================
     def navigate_to_dashboard(self):
+        if self.controller:
+            self.controller.show_page("dashboard")
+            return
         self.destroy()
         dashboard_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aDashboard.py")
         if os.path.exists(dashboard_script):
             subprocess.Popen([sys.executable, dashboard_script])
 
     def handle_logout(self):
+        if self.controller:
+            self.controller.handle_logout()
+            return
         self.destroy()
         login_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login.py")
         if os.path.exists(login_script):
             subprocess.Popen([sys.executable, login_script])
 
 if __name__ == "__main__":
-    app = SteadypayPayrollPayslipsPage()
+    from aDashboard import SteadypayAdminDashboard
+    app = SteadypayAdminDashboard(initial_page="pay_records_slips")
     app.mainloop()

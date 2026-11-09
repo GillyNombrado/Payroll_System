@@ -1,7 +1,85 @@
 """
 data.py - Centralized Data Store for Steadypay Payroll System
-Contains all Admin, Employee, Account credentials, Payslips, and computation helpers.
+Contains all Admin, Employee, Account credentials, Payslips, Role Permissions, and computation helpers.
+Supports JSON-based persistence so that runtime changes (e.g. status updates) survive across sessions.
 """
+
+from enum import Enum
+import json
+import os
+import re
+
+# Path to the persistent JSON data file (stored alongside data.py)
+_DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+_PERSIST_FILE = os.path.join(_DATA_DIR, "steadypay_data.json")
+
+# ==============================================================================
+# ROLE & PERMISSION DEFINITIONS (OOP Architecture)
+# ==============================================================================
+class Role(Enum):
+    SUPER_ADMIN = "SUPER_ADMIN"
+    STANDARD_ADMIN = "STANDARD_ADMIN"
+
+class UserSession:
+    """
+    Manages the authenticated user's profile, role, and permission checks.
+    Enforces strict segregation between Standard Admin and Super Admin capabilities.
+    """
+    def __init__(self, data=None):
+        self._data = data if data is not None else get_admin_data()
+        self.name = self._data.get("name", "Ava Morgan")
+        self.role_title = self._data.get("role", "Payroll Admin")
+        self.email = self._data.get("email", "admin@gmail.com")
+        self.company_name = self._data.get("company_name", "Steadypay Technologies Inc.")
+        status = self._data.get("status", "")
+
+        # Explicit role classification: Default Ava Morgan session is Standard Admin
+        if "Super Admin" in status and "Standard" not in status:
+            self.role = Role.SUPER_ADMIN
+        else:
+            self.role = Role.STANDARD_ADMIN
+
+    def has_role(self, required_role: Role) -> bool:
+        """Explicit permission verification."""
+        if self.role == Role.SUPER_ADMIN:
+            return True
+        return self.role == required_role
+
+    def is_super_admin(self) -> bool:
+        return self.role == Role.SUPER_ADMIN
+
+    def is_standard_admin(self) -> bool:
+        return self.role == Role.STANDARD_ADMIN
+
+    def can_manage_employees(self) -> bool:
+        """Super Admin only: creating/onboarding/offboarding employees."""
+        return self.has_role(Role.SUPER_ADMIN)
+
+    def can_edit_sensitive_financials(self) -> bool:
+        """Super Admin only: modifying base salaries, bank details, tax status."""
+        return self.has_role(Role.SUPER_ADMIN)
+
+    def can_override_audit_exceptions(self) -> bool:
+        """Super Admin only: clearing and overriding critical audit check exceptions."""
+        return self.has_role(Role.SUPER_ADMIN)
+
+    def can_execute_final_disbursement(self) -> bool:
+        """Super Admin only: generating banking NACHA files and sealing/disbursing payroll periods."""
+        return self.has_role(Role.SUPER_ADMIN)
+
+_CURRENT_USER_SESSION = None
+
+def get_current_user() -> UserSession:
+    """Returns the singleton authenticated UserSession instance."""
+    global _CURRENT_USER_SESSION
+    if _CURRENT_USER_SESSION is None:
+        _CURRENT_USER_SESSION = UserSession()
+    return _CURRENT_USER_SESSION
+
+def set_current_user_role(role: Role):
+    """Allows toggling role for testing or session switching."""
+    user = get_current_user()
+    user.role = role
 
 # ==============================================================================
 # 1. ADMIN USER & COMPANY DATA
@@ -9,7 +87,7 @@ Contains all Admin, Employee, Account credentials, Payslips, and computation hel
 COMPANY_DATA = {
     "name": "Steadypay Technologies Inc.",
     "legal_name": "Steadypay Technologies Inc.",
-    "ein": "12-3456789",
+    "ein": "009-876-543-000",
     "address": "350 5th Avenue, Suite 4200, New York, NY 10118",
     "currency": "USD ($) - US Dollar",
     "pay_cycle": "Semi-Monthly (1st-15th & 16th-End)",
@@ -27,7 +105,7 @@ ADMIN_DATA = {
     "hired_date": "March 12, 2021",
     "department": "Finance & Human Resources",
     "location": "New York HQ",
-    "status": "Active (Super Admin)",
+    "status": "Active (Standard Admin)",
     "avatar_initials": "AM",
     "avatar_color": "#FF9F1C"
 }
@@ -234,6 +312,89 @@ def compute_payroll_summary():
         "pending_payslips": f"{pending_count} slips",
         "next_payday": "Sep 30, 2026"
     }
+
+def update_employee_status(emp_id: str, new_status: str):
+    """
+    Updates an employee's status in EMPLOYEES_DATA and persists the change.
+    emp_id: e.g. 'EMP-103'
+    new_status: e.g. 'Approved' or 'Pending'
+    """
+    for emp in EMPLOYEES_DATA:
+        if emp["id"] == emp_id:
+            emp["status"] = new_status
+            break
+    save_data()
+
+def update_all_employee_statuses(new_status: str):
+    """
+    Updates the status of ALL employees in EMPLOYEES_DATA and persists the change.
+    """
+    for emp in EMPLOYEES_DATA:
+        emp["status"] = new_status
+    save_data()
+
+def save_data():
+    """
+    Persists the current state of EMPLOYEES_DATA, COMPANY_DATA, and ADMIN_DATA
+    both to the JSON persistence file and directly into data.py so changes
+    persist permanently across sessions and appear directly in data.py.
+    """
+    payload = {
+        "employees": EMPLOYEES_DATA,
+        "company": COMPANY_DATA,
+        "admin": ADMIN_DATA
+    }
+    # 1. Save to JSON persistence file
+    try:
+        with open(_PERSIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+    # 2. Update data.py source file directly on disk so viewing data.py reflects changes
+    try:
+        py_file = os.path.join(_DATA_DIR, "data.py")
+        if os.path.exists(py_file):
+            with open(py_file, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            for emp in EMPLOYEES_DATA:
+                eid = emp["id"]
+                estat = emp["status"]
+                pattern = r'("id":\s*"' + re.escape(eid) + r'"[\s\S]*?)("status":\s*)"[^"]+"'
+                content = re.sub(pattern, r'\g<1>\g<2>"' + estat + '"', content)
+
+            with open(py_file, "w", encoding="utf-8") as f:
+                f.write(content)
+    except Exception:
+        pass
+
+def load_data():
+    """
+    Loads persisted data from the JSON file and merges it into the module-level
+    dictionaries. Called once at import time. If the file does not exist, the
+    hard-coded defaults above are used as-is.
+    """
+    global EMPLOYEES_DATA, COMPANY_DATA, ADMIN_DATA
+    if not os.path.exists(_PERSIST_FILE):
+        return
+    try:
+        with open(_PERSIST_FILE, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if "employees" in payload and isinstance(payload["employees"], list):
+            EMPLOYEES_DATA.clear()
+            EMPLOYEES_DATA.extend(payload["employees"])
+        if "company" in payload and isinstance(payload["company"], dict):
+            COMPANY_DATA.clear()
+            COMPANY_DATA.update(payload["company"])
+        if "admin" in payload and isinstance(payload["admin"], dict):
+            ADMIN_DATA.clear()
+            ADMIN_DATA.update(payload["admin"])
+    except Exception:
+        pass  # Fall back to hard-coded defaults on any read error
+
+# Load persisted data on module import (merges saved state over defaults)
+load_data()
 
 # ==============================================================================
 # 5. UI ROUNDED CORNER DRAWING HELPERS & COMPONENTS

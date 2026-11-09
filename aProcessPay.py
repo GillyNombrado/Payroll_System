@@ -6,17 +6,66 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from data import (
     get_admin_data, get_all_employees,
-    draw_rounded_rectangle, RoundedBadge
+    draw_rounded_rectangle, RoundedBadge,
+    Role, get_current_user
 )
 
-class SteadypayProcessPayPage(tk.Tk):
-    def __init__(self):
-        super().__init__()
+class ToolTip:
+    """Lightweight tooltip widget for displaying helpful role and status context."""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
 
-        self.title("Steadypay - Process Payroll Wizard (Admin)")
-        self.geometry("1240x780")
-        self.minsize(1120, 680)
-        self.configure(bg="#FFFFFF")
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 20
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+            self.tip_window = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(
+                tw,
+                text=self.text,
+                justify="left",
+                background="#2C3E50",
+                foreground="#FFFFFF",
+                relief="flat",
+                font=("Segoe UI", 8),
+                padx=8,
+                pady=4
+            )
+            label.pack()
+        except Exception:
+            pass
+
+    def hide_tip(self, event=None):
+        if self.tip_window:
+            try:
+                self.tip_window.destroy()
+            except Exception:
+                pass
+            self.tip_window = None
+
+class SteadypayProcessPayPage(tk.Frame):
+    def __init__(self, parent=None, controller=None):
+        if parent is None:
+            self.root = tk.Tk()
+            self.root.title("Steadypay - Process Payroll")
+            self.root.geometry("1240x780")
+            self.root.minsize(1120, 680)
+            self.root.configure(bg="#FFFFFF")
+            super().__init__(self.root, bg="#FFFFFF")
+            self.pack(fill="both", expand=True)
+            self.controller = controller
+        else:
+            self.root = parent.winfo_toplevel()
+            super().__init__(parent, bg="#FFFFFF")
+            self.controller = controller
 
         # Color Palette Definition (Based on Steadypay visual design)
         self.colors = {
@@ -43,16 +92,18 @@ class SteadypayProcessPayPage(tk.Tk):
             "avatar_mint": "#4ED8C8"
         }
 
-        # Centralized Admin Data
+        # Centralized Admin Data & User Session
         self.admin_data = get_admin_data()
+        self.user = get_current_user()
 
         # Wizard State
         self.current_step = 1
         self.total_steps = 5
+        self.visited_steps = {1}
         self.step_titles = [
             ("Time & Attendance", "Sync timesheets & overtime"),
-            ("Adjustments & Variable", "Bonuses & pre-tax entries"),
-            ("Automated Calculation", "Taxes & statutory net pay"),
+            ("Adjustments & Variable", "Bonuses, allowances & statutory entries"),
+            ("Automated Calculation", "BIR taxes & statutory net pay"),
             ("Audit & Exceptions", "Pre-payment discrepancy checks"),
             ("Finalization & Triggers", "Lock period & disburse")
         ]
@@ -125,19 +176,19 @@ class SteadypayProcessPayPage(tk.Tk):
             holiday_rate = round(hourly_rate * 2.0, 2)
             ot_pay = round((ot_hours * ot_rate) + (holiday_hours * holiday_rate), 2)
 
-            # Adjustments
+            # Adjustments & Mandatory Benefits
             bonus = bonuses_map.get(eid, 200.00)
             reimbursement = 75.00 if eid in ("EMP-101", "EMP-103") else 0.00
-            pretax_health = 160.00
-            pretax_401k = round(base * 0.04, 2)
+            pretax_health = 160.00  # PhilHealth Employee Share
+            pretax_401k = round(base * 0.04, 2)  # Pag-IBIG Mandatory Contribution
 
             gross_pay = round(base + ot_pay + bonus + reimbursement, 2)
 
-            # Statutory Taxes
-            fed_tax = round(gross_pay * 0.105, 2)      # 10.5% Federal
-            state_tax = round(gross_pay * 0.045, 2)    # 4.5% State
-            fica_tax = round(gross_pay * 0.0765, 2)    # 7.65% Social Security & Medicare
-            total_tax = round(fed_tax + state_tax + fica_tax, 2)
+            # Philippine Statutory Deductions & Tax Withholdings (TRAIN Law RA 10963)
+            bir_tax = round(gross_pay * 0.105, 2)      # 10.5% BIR Withholding (TRAIN Law)
+            sss_tax = round(gross_pay * 0.045, 2)      # 4.5% SSS Employee Share (RA 11199)
+            philhealth_tax = round(gross_pay * 0.0765, 2) # PhilHealth & Pag-IBIG statutory share
+            total_tax = round(bir_tax + sss_tax + philhealth_tax, 2)
 
             total_benefits = round(pretax_health + pretax_401k, 2)
             total_deductions = round(total_tax + total_benefits, 2)
@@ -164,9 +215,12 @@ class SteadypayProcessPayPage(tk.Tk):
                 "pretax_401k": pretax_401k,
                 "base_salary": base,
                 "gross_pay": gross_pay,
-                "fed_tax": fed_tax,
-                "state_tax": state_tax,
-                "fica_tax": fica_tax,
+                "bir_tax": bir_tax,
+                "sss_tax": sss_tax,
+                "philhealth_tax": philhealth_tax,
+                "fed_tax": bir_tax,
+                "state_tax": sss_tax,
+                "fica_tax": philhealth_tax,
                 "total_tax": total_tax,
                 "total_benefits": total_benefits,
                 "total_deductions": total_deductions,
@@ -175,32 +229,37 @@ class SteadypayProcessPayPage(tk.Tk):
             })
 
     def recalculate_live_engine(self):
-        """Recalculates all mathematical figures dynamically based on state."""
+        """Recalculates all mathematical figures dynamically based on Philippine statutory rates."""
         for item in self.payroll_items:
             ot_rate = round(item["hourly_rate"] * 1.5, 2)
             hol_rate = round(item["hourly_rate"] * 2.0, 2)
             item["ot_pay"] = round((item["ot_hours"] * ot_rate) + (item["holiday_hours"] * hol_rate), 2)
             item["gross_pay"] = round(item["base_salary"] + item["ot_pay"] + item["bonus"] + item["reimbursement"], 2)
 
-            item["fed_tax"] = round(item["gross_pay"] * 0.105, 2)
-            item["state_tax"] = round(item["gross_pay"] * 0.045, 2)
-            item["fica_tax"] = round(item["gross_pay"] * 0.0765, 2)
-            item["total_tax"] = round(item["fed_tax"] + item["state_tax"] + item["fica_tax"], 2)
+            item["bir_tax"] = round(item["gross_pay"] * 0.105, 2)
+            item["sss_tax"] = round(item["gross_pay"] * 0.045, 2)
+            item["philhealth_tax"] = round(item["gross_pay"] * 0.0765, 2)
+            item["fed_tax"] = item["bir_tax"]
+            item["state_tax"] = item["sss_tax"]
+            item["fica_tax"] = item["philhealth_tax"]
+            item["total_tax"] = round(item["bir_tax"] + item["sss_tax"] + item["philhealth_tax"], 2)
 
             item["pretax_401k"] = round(item["base_salary"] * 0.04, 2)
             item["total_benefits"] = round(item["pretax_health"] + item["pretax_401k"], 2)
             item["total_deductions"] = round(item["total_tax"] + item["total_benefits"], 2)
             item["net_pay"] = round(item["gross_pay"] - item["total_deductions"], 2)
 
+        self.update_live_summary_bar()
+
     # ==========================================
     # LAYOUT SETUP
     # ==========================================
     def setup_layout(self):
-        # 1. Left Fixed Sidebar
-        self.create_sidebar()
-
-        # 2. Right Main Scrollable Area
-        self.create_scrollable_main_content()
+        if self.controller is None:
+            self.create_sidebar()
+            self.create_scrollable_main_content()
+        else:
+            self.create_scrollable_main_content(parent=self)
 
     # ==========================================
     # SIDEBAR NAVIGATION
@@ -236,7 +295,7 @@ class SteadypayProcessPayPage(tk.Tk):
         # Navigation Menu List
         menu_items = [
             ("🏠", "Dashboard", False),
-            ("👥", "Employee\nmanagement", False),
+            ("👥", "Workforce\nDirectory", False),
             ("💳", "Process payroll", True),
             ("📄", "Payroll &\nPayslips", False),
             ("⚙️", "Settings", False)
@@ -306,12 +365,24 @@ class SteadypayProcessPayPage(tk.Tk):
             widget.bind("<Button-1>", lambda e: self.handle_logout())
 
     def on_menu_click(self, menu_name):
+        menu_to_page = {
+            "Dashboard": "dashboard",
+            "Workforce\nDirectory": "employee",
+            "Process payroll": "process_pay",
+            "Payroll &\nPayslips": "pay_records_slips",
+            "Settings": "settings"
+        }
+        if self.controller:
+            page = menu_to_page.get(menu_name, "dashboard")
+            self.controller.show_page(page)
+            return
+
         if menu_name == "Dashboard":
             self.navigate_to_dashboard()
             return
 
         menu_map = {
-            "Employee\nmanagement": "aEmployee.py",
+            "Workforce\nDirectory": "aEmployee.py",
             "Process payroll": "aProcessPay.py",
             "Payroll &\nPayslips": "aPayRecord&Slip.py",
             "Settings": "aSettings.py"
@@ -326,15 +397,28 @@ class SteadypayProcessPayPage(tk.Tk):
     # ==========================================
     # SCROLLABLE MAIN CONTENT AREA
     # ==========================================
-    def create_scrollable_main_content(self):
-        right_container = tk.Frame(self, bg=self.colors["white"])
-        right_container.pack(side="right", fill="both", expand=True)
+    def create_scrollable_main_content(self, parent=None):
+        if parent is None:
+            right_container = tk.Frame(self, bg=self.colors["white"])
+            right_container.pack(side="right", fill="both", expand=True)
+        else:
+            right_container = parent
 
-        # Fixed top header outside canvas
+        # 1. Fixed Top Header outside canvas
         self.create_top_header(right_container)
 
-        self.main_canvas = tk.Canvas(right_container, bg=self.colors["white"], highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(right_container, orient="vertical", command=self.main_canvas.yview)
+        # 2. Persistent Live Summary & Exception Drawer (Always Visible)
+        self.create_persistent_summary_bar(right_container)
+
+        # 3. Sticky Bottom Navigation Bar (Fixed at Viewport Bottom)
+        self.create_wizard_nav_footer(right_container)
+
+        # 4. Middle Scrollable Container
+        middle_frame = tk.Frame(right_container, bg=self.colors["white"])
+        middle_frame.pack(side="left", fill="both", expand=True)
+
+        self.main_canvas = tk.Canvas(middle_frame, bg=self.colors["white"], highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(middle_frame, orient="vertical", command=self.main_canvas.yview)
 
         self.content_frame = tk.Frame(self.main_canvas, bg=self.colors["white"], padx=26, pady=16)
         self.canvas_window = self.main_canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
@@ -353,22 +437,26 @@ class SteadypayProcessPayPage(tk.Tk):
         self.main_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.main_canvas.bind("<MouseWheel>", self._on_mousewheel)
 
-        # 1. Step-by-Step Payroll Wizard Stepper Bar
+        # Step-by-Step Payroll Wizard Stepper Bar (Clickable Tabs)
         self.create_wizard_stepper_bar(self.content_frame)
 
-        # 2. Dynamic Step Content Container
+        # Dynamic Step Content Container
         self.step_content_container = tk.Frame(self.content_frame, bg=self.colors["white"])
         self.step_content_container.pack(fill="both", expand=True, pady=(0, 14))
 
-        # 3. Wizard Bottom Navigation Footer
-        self.create_wizard_nav_footer(self.content_frame)
-
         # Render active step
         self.render_active_step()
+
+    def _on_mousewheel(self, event):
+        if hasattr(self, "main_canvas") and self.main_canvas.winfo_exists():
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_show(self):
+        """Called whenever this tab is brought into view."""
+        if hasattr(self, "main_canvas"):
+            self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
     # ==========================================
     # FIXED TOP HEADER
@@ -402,7 +490,7 @@ class SteadypayProcessPayPage(tk.Tk):
 
         tk.Label(
             left_box,
-            text="Automated end-to-end payroll calculation, audit validation, and disbursement workflow.",
+            text="Interactive Payroll Workbench • Direct Stepper Navigation & Real-Time Calculation Engine",
             font=("Segoe UI", 9),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
@@ -450,11 +538,140 @@ class SteadypayProcessPayPage(tk.Tk):
 
         tk.Label(
             profile_info,
-            text=self.admin_data["role"],
+            text=f"{self.user.role_title}",
             font=("Segoe UI", 7),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
         ).pack(anchor="w")
+
+    # ==========================================
+    # PERSISTENT LIVE SUMMARY & EXCEPTION DRAWER
+    # ==========================================
+    def create_persistent_summary_bar(self, parent):
+        """Builds the persistent live payout summary panel and exception drawer."""
+        self.summary_bar = tk.Frame(
+            parent,
+            bg="#F7FCFC",
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            padx=22,
+            pady=10
+        )
+        self.summary_bar.pack(side="top", fill="x")
+
+        inner = tk.Frame(self.summary_bar, bg="#F7FCFC")
+        inner.pack(fill="x")
+
+        # Left: 4 Financial KPI Blocks
+        left_kpis = tk.Frame(inner, bg="#F7FCFC")
+        left_kpis.pack(side="left")
+
+        # 1. Total Gross Pay
+        b1 = tk.Frame(left_kpis, bg="#F7FCFC")
+        b1.pack(side="left", padx=(0, 22))
+        tk.Label(b1, text="TOTAL GROSS PAY", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="w")
+        self.live_lbl_gross = tk.Label(b1, text="$0.00", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg="#F7FCFC")
+        self.live_lbl_gross.pack(anchor="w")
+
+        # 2. Tax Withholding
+        b2 = tk.Frame(left_kpis, bg="#F7FCFC")
+        b2.pack(side="left", padx=(0, 22))
+        tk.Label(b2, text="TAX WITHHOLDING", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="w")
+        self.live_lbl_tax = tk.Label(b2, text="-$0.00", font=("Segoe UI", 11, "bold"), fg="#E05252", bg="#F7FCFC")
+        self.live_lbl_tax.pack(anchor="w")
+
+        # 3. Benefit Deductions
+        b3 = tk.Frame(left_kpis, bg="#F7FCFC")
+        b3.pack(side="left", padx=(0, 22))
+        tk.Label(b3, text="BENEFIT DEDUCTIONS", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="w")
+        self.live_lbl_ben = tk.Label(b3, text="-$0.00", font=("Segoe UI", 11, "bold"), fg="#E05252", bg="#F7FCFC")
+        self.live_lbl_ben.pack(anchor="w")
+
+        # 4. Net Take-Home Disbursement
+        b4 = tk.Frame(left_kpis, bg="#F7FCFC")
+        b4.pack(side="left", padx=(0, 22))
+        tk.Label(b4, text="NET DISBURSEMENT", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="w")
+        self.live_lbl_net = tk.Label(b4, text="$0.00", font=("Segoe UI", 12, "bold"), fg=self.colors["deep_teal"], bg="#F7FCFC")
+        self.live_lbl_net.pack(anchor="w")
+
+        # Right: Exception Drawer & Status Badges
+        right_drawer = tk.Frame(inner, bg="#F7FCFC")
+        right_drawer.pack(side="right")
+
+        # Cycle Pill
+        cycle_box = tk.Frame(right_drawer, bg="#F7FCFC")
+        cycle_box.pack(side="left", padx=(0, 10))
+        tk.Label(cycle_box, text="PAY PERIOD", font=("Segoe UI", 6, "bold"), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="e")
+        tk.Label(cycle_box, text=self.pay_period_name, font=("Segoe UI", 8, "bold"), fg=self.colors["text_dark"], bg="#F7FCFC").pack(anchor="e")
+
+        # Clickable Exception Drawer Pill
+        self.live_exception_pill = tk.Label(
+            right_drawer,
+            text="⚠️ 2 Warnings (Click to Audit)",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.colors["pill_warning"],
+            fg=self.colors["pill_warning_text"],
+            padx=10,
+            pady=4,
+            cursor="hand2"
+        )
+        self.live_exception_pill.pack(side="left", padx=(0, 8))
+        self.live_exception_pill.bind("<Button-1>", lambda e: self.go_to_step(4))
+        ToolTip(self.live_exception_pill, "Click to jump immediately to Step 4: Audit & Exceptions")
+
+        # Lock / Draft Status Badge
+        self.live_seal_badge = tk.Label(
+            right_drawer,
+            text="⏳ Draft Mode",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.colors["pill_pending"],
+            fg=self.colors["pill_pending_text"],
+            padx=10,
+            pady=4
+        )
+        self.live_seal_badge.pack(side="left")
+
+        # Compute initial figures
+        self.update_live_summary_bar()
+
+    def update_live_summary_bar(self):
+        if not hasattr(self, "live_lbl_gross"):
+            return
+        tot_gross = sum(i["gross_pay"] for i in self.payroll_items)
+        tot_tax = sum(i["total_tax"] for i in self.payroll_items)
+        tot_ben = sum(i["total_benefits"] for i in self.payroll_items)
+        tot_net = sum(i["net_pay"] for i in self.payroll_items)
+
+        self.live_lbl_gross.config(text=f"${tot_gross:,.2f}")
+        self.live_lbl_tax.config(text=f"-${tot_tax:,.2f}")
+        self.live_lbl_ben.config(text=f"-${tot_ben:,.2f}")
+        self.live_lbl_net.config(text=f"${tot_net:,.2f}")
+
+        if self.exceptions_resolved:
+            self.live_exception_pill.config(
+                text="✓ All Checks Passed",
+                bg=self.colors["pill_approved"],
+                fg=self.colors["pill_approved_text"]
+            )
+        else:
+            self.live_exception_pill.config(
+                text="⚠️ 2 Warnings (Click to Audit)",
+                bg=self.colors["pill_warning"],
+                fg=self.colors["pill_warning_text"]
+            )
+
+        if self.period_locked:
+            self.live_seal_badge.config(
+                text="🔒 Sealed",
+                bg=self.colors["pill_approved"],
+                fg=self.colors["pill_approved_text"]
+            )
+        else:
+            self.live_seal_badge.config(
+                text="⏳ Draft Mode",
+                bg=self.colors["pill_pending"],
+                fg=self.colors["pill_pending_text"]
+            )
 
     # ==========================================
     # VISUAL STEP-BY-STEP PAYROLL WIZARD BAR
@@ -499,53 +716,62 @@ class SteadypayProcessPayPage(tk.Tk):
         self.render_stepper_nodes()
 
     def render_stepper_nodes(self):
-        """Renders the step circles, titles, and connecting status lines."""
+        """Renders the step circles, titles, and connecting status lines with clickable tabs."""
         for c in self.steps_row.winfo_children():
             c.destroy()
 
         for idx, (title, subtitle) in enumerate(self.step_titles, start=1):
-            step_frame = tk.Frame(self.steps_row, bg=self.colors["white"], cursor="hand2")
-            step_frame.pack(side="left", fill="x", expand=True)
+            is_active = (idx == self.current_step)
+            is_completed = (idx < self.current_step or idx in self.visited_steps) and not is_active
+
+            step_frame = tk.Frame(
+                self.steps_row,
+                bg="#FFF9F2" if is_active else self.colors["white"],
+                highlightbackground=self.colors["primary_orange"] if is_active else self.colors["border_light"],
+                highlightthickness=1 if is_active else 0,
+                cursor="hand2",
+                padx=8,
+                pady=6
+            )
+            step_frame.pack(side="left", fill="x", expand=True, padx=4)
             step_frame.bind("<Button-1>", lambda e, s=idx: self.go_to_step(s))
 
-            # Indicator Circle + Connecting Line
-            indicator_box = tk.Frame(step_frame, bg=self.colors["white"])
+            # Indicator Circle Box
+            indicator_box = tk.Frame(step_frame, bg=step_frame["bg"])
             indicator_box.pack(anchor="center", pady=(0, 4))
+            indicator_box.bind("<Button-1>", lambda e, s=idx: self.go_to_step(s))
 
-            # Circle Canvas
-            cv = tk.Canvas(indicator_box, width=32, height=32, bg=self.colors["white"], highlightthickness=0)
+            cv = tk.Canvas(indicator_box, width=30, height=30, bg=step_frame["bg"], highlightthickness=0)
             cv.pack(side="left")
             cv.bind("<Button-1>", lambda e, s=idx: self.go_to_step(s))
 
-            is_completed = (idx < self.current_step)
-            is_active = (idx == self.current_step)
-
-            if is_completed:
-                fill_col = self.colors["pill_approved"]
-                out_col = self.colors["dark_teal"]
-                txt = "✓"
-                txt_col = self.colors["deep_teal"]
-            elif is_active:
+            if is_active:
                 fill_col = self.colors["primary_orange"]
                 out_col = self.colors["primary_orange"]
                 txt = str(idx)
                 txt_col = "#FFFFFF"
+            elif is_completed:
+                fill_col = self.colors["pill_approved"]
+                out_col = self.colors["dark_teal"]
+                txt = "✓"
+                txt_col = self.colors["deep_teal"]
             else:
                 fill_col = "#F4F7F7"
                 out_col = self.colors["border_light"]
                 txt = str(idx)
                 txt_col = self.colors["gray_text"]
 
-            cv.create_oval(2, 2, 30, 30, fill=fill_col, outline=out_col, width=2 if is_active else 1)
-            cv.create_text(16, 16, text=txt, fill=txt_col, font=("Segoe UI", 9, "bold"))
+            cv.create_oval(2, 2, 28, 28, fill=fill_col, outline=out_col, width=2 if is_active else 1)
+            cv.create_text(15, 15, text=txt, fill=txt_col, font=("Segoe UI", 9, "bold"))
 
-            # Step Label
+            # Step Title Label
+            title_col = self.colors["primary_orange"] if is_active else (self.colors["dark_teal"] if is_completed else self.colors["gray_text"])
             lbl = tk.Label(
                 step_frame,
                 text=f"{idx}. {title}",
                 font=("Segoe UI", 8, "bold" if is_active else "normal"),
-                fg=self.colors["primary_orange"] if is_active else (self.colors["dark_teal"] if is_completed else self.colors["gray_text"]),
-                bg=self.colors["white"]
+                fg=title_col,
+                bg=step_frame["bg"]
             )
             lbl.pack(anchor="center")
             lbl.bind("<Button-1>", lambda e, s=idx: self.go_to_step(s))
@@ -555,7 +781,7 @@ class SteadypayProcessPayPage(tk.Tk):
                 text=subtitle,
                 font=("Segoe UI", 6),
                 fg=self.colors["gray_text"],
-                bg=self.colors["white"]
+                bg=step_frame["bg"]
             )
             sub_lbl.pack(anchor="center")
             sub_lbl.bind("<Button-1>", lambda e, s=idx: self.go_to_step(s))
@@ -563,6 +789,7 @@ class SteadypayProcessPayPage(tk.Tk):
     def go_to_step(self, step_number):
         if 1 <= step_number <= self.total_steps:
             self.current_step = step_number
+            self.visited_steps.add(step_number)
             self.stepper_status_lbl.config(
                 text=f"Step {self.current_step} of {self.total_steps}: {self.step_titles[self.current_step - 1][0]}"
             )
@@ -574,8 +801,15 @@ class SteadypayProcessPayPage(tk.Tk):
     # WIZARD BOTTOM NAVIGATION FOOTER
     # ==========================================
     def create_wizard_nav_footer(self, parent):
-        self.nav_footer = tk.Frame(parent, bg=self.colors["white"], pady=10)
-        self.nav_footer.pack(fill="x")
+        self.nav_footer = tk.Frame(
+            parent,
+            bg=self.colors["white"],
+            highlightbackground=self.colors["border_light"],
+            highlightthickness=1,
+            padx=24,
+            pady=12
+        )
+        self.nav_footer.pack(side="bottom", fill="x")
 
         self.prev_btn = tk.Button(
             self.nav_footer,
@@ -593,9 +827,27 @@ class SteadypayProcessPayPage(tk.Tk):
         )
         self.prev_btn.pack(side="left")
 
+        self.save_draft_btn = tk.Button(
+            self.nav_footer,
+            text="💾 Save Draft",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.colors["white"],
+            fg=self.colors["text_dark"],
+            highlightbackground=self.colors["border_peach"],
+            highlightthickness=1,
+            activebackground=self.colors["sidebar_bg"],
+            bd=0,
+            relief="flat",
+            cursor="hand2",
+            padx=14,
+            pady=6,
+            command=self.action_save_draft
+        )
+        self.save_draft_btn.pack(side="left", padx=12)
+
         self.next_btn = tk.Button(
             self.nav_footer,
-            text="Next Step →",
+            text="Proceed to Next Step →",
             font=("Segoe UI", 8, "bold"),
             bg=self.colors["primary_orange"],
             fg=self.colors["white"],
@@ -612,6 +864,17 @@ class SteadypayProcessPayPage(tk.Tk):
 
         self.update_nav_footer_buttons()
 
+    def action_save_draft(self):
+        tot_net = sum(i["net_pay"] for i in self.payroll_items)
+        messagebox.showinfo(
+            "Draft Saved 💾",
+            f"Payroll Workbench draft for cycle '{self.pay_period_name}' saved successfully!\n\n"
+            f"• Headcount: {len(self.payroll_items)} employees\n"
+            f"• Current Net Disbursement: ${tot_net:,.2f}\n"
+            f"• All attendance logs, adjustments, and variable entries have been cached.",
+            parent=self
+        )
+
     def update_nav_footer_buttons(self):
         if self.current_step == 1:
             self.prev_btn.config(state="disabled", fg="#A0B0B0", cursor="arrow")
@@ -619,7 +882,10 @@ class SteadypayProcessPayPage(tk.Tk):
             self.prev_btn.config(state="normal", fg=self.colors["dark_teal"], cursor="hand2")
 
         if self.current_step == self.total_steps:
-            self.next_btn.config(text="Finalize & Disburse Payroll 🚀", bg=self.colors["dark_teal"])
+            if self.user.has_role(Role.SUPER_ADMIN):
+                self.next_btn.config(text="Finalize & Disburse Payroll 🚀", bg=self.colors["dark_teal"])
+            else:
+                self.next_btn.config(text="Submit for Super Admin Approval 📋", bg=self.colors["primary_orange"])
         else:
             self.next_btn.config(text=f"Proceed to Step {self.current_step + 1} →", bg=self.colors["primary_orange"])
 
@@ -793,7 +1059,7 @@ class SteadypayProcessPayPage(tk.Tk):
             messagebox.showinfo("File Uploaded", f"Biometric punch logs loaded from:\n{os.path.basename(f)}\nNo discrepancies found.", parent=self)
 
     # =========================================================================
-    # STEP 2: ADJUSTMENTS & RECURRING VARIABLE ENTRIES
+    # STEP 2: ADJUSTMENTS & RECURRING VARIABLE ENTRIES (INLINE WORKBENCH)
     # =========================================================================
     def render_step_2_adjustments(self, parent):
         card = tk.Frame(
@@ -823,37 +1089,33 @@ class SteadypayProcessPayPage(tk.Tk):
 
         tk.Label(
             left_hdr,
-            text="One-time bonuses, expense reimbursements, and pre-tax benefit contributions.",
+            text="Interactive Spreadsheet: Edit bonuses & reimbursements directly below. (Auto-calculates & saves live)",
             font=("Segoe UI", 12, "bold"),
             fg=self.colors["dark_teal"],
             bg=self.colors["white"]
         ).pack(anchor="w", pady=(2, 0))
 
-        add_btn = tk.Button(
+        # Right Live Indicator Badge
+        RoundedBadge(
             hdr,
-            text="Add Custom Adjustment +",
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["primary_orange"],
-            fg=self.colors["white"],
-            activebackground=self.colors["soft_orange"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self.show_quick_adjustment_popup
-        )
-        add_btn.pack(side="right")
+            text="⚡ Live Grid Active",
+            bg_color=self.colors["pill_approved"],
+            fg_color=self.colors["pill_approved_text"],
+            radius=8,
+            width=130,
+            height=24,
+            parent_bg=self.colors["white"]
+        ).pack(side="right")
 
         # Table Grid
         cols = [
             ("Employee", 3, "w"),
-            ("Performance Bonus", 2, "e"),
-            ("Travel Reimbursement", 2, "e"),
-            ("Pre-Tax Health", 2, "e"),
-            ("401(k) Contribution", 2, "e"),
+            ("Performance Bonus ($)", 2, "e"),
+            ("Travel Reimbursement ($)", 2, "e"),
+            ("PhilHealth Share 🔒", 2, "e"),
+            ("Pag-IBIG Fund 🔒", 2, "e"),
             ("Net Adjustment Impact", 2, "e"),
-            ("Action", 1, "center")
+            ("Status", 1, "center")
         ]
 
         grid_frame = tk.Frame(card, bg=self.colors["white"])
@@ -863,10 +1125,18 @@ class SteadypayProcessPayPage(tk.Tk):
             grid_frame.columnconfigure(i, weight=w)
 
         for idx, (c_name, _, align) in enumerate(cols):
-            tk.Label(grid_frame, text=c_name, font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"], anchor=align).grid(row=0, column=idx, sticky="ew", padx=6, pady=(0, 6))
+            tk.Label(
+                grid_frame,
+                text=c_name,
+                font=("Segoe UI", 8, "bold"),
+                fg=self.colors["gray_text"],
+                bg=self.colors["white"],
+                anchor=align
+            ).grid(row=0, column=idx, sticky="ew", padx=6, pady=(0, 6))
         tk.Frame(grid_frame, height=1, bg=self.colors["border_light"]).grid(row=1, column=0, columnspan=len(cols), sticky="ew", pady=(0, 6))
 
         for r_idx, emp in enumerate(self.payroll_items, start=2):
+            # Col 0: Avatar + Name
             emp_box = tk.Frame(grid_frame, bg=self.colors["white"])
             emp_box.grid(row=r_idx, column=0, sticky="w", padx=6, pady=4)
             av = tk.Canvas(emp_box, width=28, height=28, bg=self.colors["white"], highlightthickness=0)
@@ -875,69 +1145,127 @@ class SteadypayProcessPayPage(tk.Tk):
             av.create_text(14, 14, text=emp["initials"], fill="#FFFFFF", font=("Segoe UI", 7, "bold"))
             tk.Label(emp_box, text=emp["name"], font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(side="left")
 
-            tk.Label(grid_frame, text=f"+${emp['bonus']:,.2f}", font=("Segoe UI", 8), fg=self.colors["dark_teal"], bg=self.colors["white"], anchor="e").grid(row=r_idx, column=1, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"+${emp['reimbursement']:,.2f}", font=("Segoe UI", 8), fg=self.colors["dark_teal"], bg=self.colors["white"], anchor="e").grid(row=r_idx, column=2, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"-${emp['pretax_health']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e").grid(row=r_idx, column=3, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"-${emp['pretax_401k']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e").grid(row=r_idx, column=4, sticky="ew", padx=6, pady=4)
+            # Col 1: Bonus inline Entry
+            b_var = tk.StringVar(value=f"{emp['bonus']:.2f}")
+            b_frame = tk.Frame(grid_frame, bg=self.colors["white"])
+            b_frame.grid(row=r_idx, column=1, sticky="e", padx=6, pady=3)
+            tk.Label(b_frame, text="$", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(side="left")
+            b_entry = tk.Entry(
+                b_frame,
+                textvariable=b_var,
+                font=("Segoe UI", 8, "bold"),
+                fg=self.colors["dark_teal"],
+                bg=self.colors["white"],
+                highlightbackground=self.colors["border_peach"],
+                highlightcolor=self.colors["primary_orange"],
+                highlightthickness=1,
+                bd=0,
+                width=8,
+                justify="right"
+            )
+            b_entry.pack(side="left", ipady=2)
 
+            # Col 2: Reimbursement inline Entry
+            r_var = tk.StringVar(value=f"{emp['reimbursement']:.2f}")
+            r_frame = tk.Frame(grid_frame, bg=self.colors["white"])
+            r_frame.grid(row=r_idx, column=2, sticky="e", padx=6, pady=3)
+            tk.Label(r_frame, text="$", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(side="left")
+            r_entry = tk.Entry(
+                r_frame,
+                textvariable=r_var,
+                font=("Segoe UI", 8, "bold"),
+                fg=self.colors["dark_teal"],
+                bg=self.colors["white"],
+                highlightbackground=self.colors["border_peach"],
+                highlightcolor=self.colors["primary_orange"],
+                highlightthickness=1,
+                bd=0,
+                width=8,
+                justify="right"
+            )
+            r_entry.pack(side="left", ipady=2)
+
+            # Col 3: PhilHealth Share (Locked by Super Admin)
+            health_lbl = tk.Label(
+                grid_frame,
+                text=f"🔒 -${emp['pretax_health']:,.2f}",
+                font=("Segoe UI", 8),
+                fg="#E05252",
+                bg=self.colors["white"],
+                anchor="e",
+                cursor="question_arrow"
+            )
+            health_lbl.grid(row=r_idx, column=3, sticky="ew", padx=6, pady=4)
+            ToolTip(health_lbl, "PhilHealth Statutory Premium (RA 11223): Managed by Super Admin")
+
+            # Col 4: Pag-IBIG Fund (Locked by Super Admin)
+            k401_lbl = tk.Label(
+                grid_frame,
+                text=f"🔒 -${emp['pretax_401k']:,.2f}",
+                font=("Segoe UI", 8),
+                fg="#E05252",
+                bg=self.colors["white"],
+                anchor="e",
+                cursor="question_arrow"
+            )
+            k401_lbl.grid(row=r_idx, column=4, sticky="ew", padx=6, pady=4)
+            ToolTip(k401_lbl, "Pag-IBIG / HDMF Statutory Contribution (RA 9679): Managed by Super Admin")
+
+            # Col 5: Net Adjustment Impact
             net_adj = (emp['bonus'] + emp['reimbursement']) - (emp['pretax_health'] + emp['pretax_401k'])
             sign = "+" if net_adj >= 0 else ""
             adj_col = self.colors["primary_orange"] if net_adj >= 0 else "#E05252"
-            tk.Label(grid_frame, text=f"{sign}${net_adj:,.2f}", font=("Segoe UI", 8, "bold"), fg=adj_col, bg=self.colors["white"], anchor="e").grid(row=r_idx, column=5, sticky="ew", padx=6, pady=4)
-
-            edit_btn = tk.Button(
+            net_lbl = tk.Label(
                 grid_frame,
-                text="Edit",
-                font=("Segoe UI", 7, "bold"),
+                text=f"{sign}${net_adj:,.2f}",
+                font=("Segoe UI", 8, "bold"),
+                fg=adj_col,
                 bg=self.colors["white"],
-                fg=self.colors["primary_orange"],
-                highlightbackground=self.colors["primary_orange"],
-                highlightthickness=1,
-                bd=0,
-                relief="flat",
-                cursor="hand2",
-                padx=8,
-                pady=1,
-                command=lambda e=emp: self.edit_adjustment_entry(e)
+                anchor="e"
             )
-            edit_btn.grid(row=r_idx, column=6, padx=6, pady=4)
+            net_lbl.grid(row=r_idx, column=5, sticky="ew", padx=6, pady=4)
 
-    def show_quick_adjustment_popup(self):
-        messagebox.showinfo("Quick Adjustment", "Select an employee row to edit specific performance bonus, travel expense or insurance contribution figures.", parent=self)
+            # Col 6: Status feedback
+            status_lbl = tk.Label(
+                grid_frame,
+                text="Auto-saved ✓",
+                font=("Segoe UI", 7, "bold"),
+                fg=self.colors["deep_teal"],
+                bg=self.colors["white"],
+                anchor="center"
+            )
+            status_lbl.grid(row=r_idx, column=6, sticky="ew", padx=6, pady=4)
 
-    def edit_adjustment_entry(self, emp):
-        """Allows modifying bonus or reimbursement on the fly."""
-        dialog = tk.Toplevel(self)
-        dialog.title(f"Edit Adjustments: {emp['name']}")
-        dialog.geometry("360x280")
-        dialog.resizable(False, False)
-        dialog.configure(bg=self.colors["white"])
-        dialog.transient(self)
-        dialog.grab_set()
+            # Real-time event handler for keystrokes, focus changes, Enter, and Tab
+            def _bind_row(e_ref, b_ent, r_ent, nl, sl):
+                def _on_change(*args):
+                    try:
+                        b_val = float(b_ent.get().replace("$", "").replace(",", "").strip() or 0)
+                        r_val = float(r_ent.get().replace("$", "").replace(",", "").strip() or 0)
+                        e_ref["bonus"] = b_val
+                        e_ref["reimbursement"] = r_val
+                        self.recalculate_live_engine()
 
-        tk.Label(dialog, text=f"Adjustments for {emp['name']}", font=("Segoe UI", 10, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(padx=20, pady=(16, 10), anchor="w")
+                        n_adj = (b_val + r_val) - (e_ref["pretax_health"] + e_ref["pretax_401k"])
+                        s = "+" if n_adj >= 0 else ""
+                        c = self.colors["primary_orange"] if n_adj >= 0 else "#E05252"
+                        nl.config(text=f"{s}${n_adj:,.2f}", fg=c)
+                        sl.config(text="Auto-saved ✓", fg=self.colors["deep_teal"])
+                        self.update_live_summary_bar()
+                    except ValueError:
+                        sl.config(text="Invalid #", fg="#E05252")
+                return _on_change
 
-        tk.Label(dialog, text="One-Time Bonus ($):", font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(padx=20, anchor="w")
-        bonus_ent = tk.Entry(dialog, font=("Segoe UI", 9))
-        bonus_ent.insert(0, str(emp["bonus"]))
-        bonus_ent.pack(fill="x", padx=20, pady=(2, 8))
-
-        tk.Label(dialog, text="Expense Reimbursement ($):", font=("Segoe UI", 8, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(padx=20, anchor="w")
-        reimb_ent = tk.Entry(dialog, font=("Segoe UI", 9))
-        reimb_ent.insert(0, str(emp["reimbursement"]))
-        reimb_ent.pack(fill="x", padx=20, pady=(2, 14))
-
-        def _save():
-            try:
-                emp["bonus"] = float(bonus_ent.get())
-                emp["reimbursement"] = float(reimb_ent.get())
-                self.recalculate_live_engine()
-                dialog.destroy()
-                self.render_active_step()
-            except ValueError:
-                messagebox.showerror("Invalid Input", "Please enter valid numeric figures.", parent=dialog)
-
-        tk.Button(dialog, text="Save Adjustments", font=("Segoe UI", 8, "bold"), bg=self.colors["primary_orange"], fg=self.colors["white"], bd=0, relief="flat", cursor="hand2", padx=12, pady=6, command=_save).pack(padx=20, anchor="e")
+            handler = _bind_row(emp, b_entry, r_entry, net_lbl, status_lbl)
+            b_entry.b_var = b_var
+            r_entry.r_var = r_var
+            b_var.trace_add("write", handler)
+            r_var.trace_add("write", handler)
+            for w in (b_entry, r_entry):
+                w.bind("<KeyRelease>", handler)
+                w.bind("<FocusOut>", handler)
+                w.bind("<Return>", handler)
+                w.bind("<Tab>", handler)
 
     # =========================================================================
     # STEP 3: AUTOMATED CALCULATION ENGINE
@@ -970,27 +1298,40 @@ class SteadypayProcessPayPage(tk.Tk):
 
         tk.Label(
             left_hdr,
-            text="Statutory tax engine, FICA/Medicare rules, and net take-home pay distribution.",
+            text="Interactive Engine: Edit Base Salary below to test live statutory recalculation and net take-home pay.",
             font=("Segoe UI", 12, "bold"),
             fg=self.colors["dark_teal"],
             bg=self.colors["white"]
         ).pack(anchor="w", pady=(2, 0))
 
-        recalc_btn = tk.Button(
-            hdr,
-            text="⚡ Run Full Recalculation",
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["primary_orange"],
-            fg=self.colors["white"],
-            activebackground=self.colors["soft_orange"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self.action_run_recalc_step3
-        )
-        recalc_btn.pack(side="right")
+        if self.user.has_role(Role.SUPER_ADMIN):
+            recalc_btn = tk.Button(
+                hdr,
+                text="⚡ Run Full Recalculation",
+                font=("Segoe UI", 8, "bold"),
+                bg=self.colors["primary_orange"],
+                fg=self.colors["white"],
+                activebackground=self.colors["soft_orange"],
+                bd=0,
+                relief="flat",
+                cursor="hand2",
+                padx=12,
+                pady=6,
+                command=self.action_run_recalc_step3
+            )
+            recalc_btn.pack(side="right")
+        else:
+            badge = RoundedBadge(
+                hdr,
+                text="🔒 Statutory Formulas Verified (Super Admin)",
+                bg_color=self.colors["sidebar_bg"],
+                fg_color=self.colors["dark_teal"],
+                radius=8,
+                width=265,
+                height=26,
+                parent_bg=self.colors["white"]
+            )
+            badge.pack(side="right")
 
         # 4 High-Level Metric Tiles for the Engine
         tiles = tk.Frame(card, bg=self.colors["white"])
@@ -1003,28 +1344,31 @@ class SteadypayProcessPayPage(tk.Tk):
 
         specs = [
             ("TOTAL GROSS PAY", f"${tot_gross:,.2f}", "Base + OT + Bonuses"),
-            ("TOTAL TAX WITHHOLDING", f"-${tot_tax:,.2f}", "Fed + State + FICA 7.65%"),
-            ("BENEFIT DEDUCTIONS", f"-${tot_ben:,.2f}", "Health & 401(k) Pre-tax"),
+            ("TOTAL TAX WITHHOLDING", f"-${tot_tax:,.2f}", "BIR Withholding (TRAIN Law)"),
+            ("STATUTORY CONTRIBUTIONS", f"-${tot_ben:,.2f}", "SSS + PhilHealth + Pag-IBIG"),
             ("NET DISBURSEMENT", f"${tot_net:,.2f}", "100% EFT Direct Deposit")
         ]
 
+        metric_lbls = {}
         for i, (t, v, s) in enumerate(specs):
             tile = tk.Frame(tiles, bg="#F7FCFC", highlightbackground=self.colors["border_light"], highlightthickness=1, padx=12, pady=8)
             tile.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 8, 0))
             tiles.columnconfigure(i, weight=1)
             tk.Label(tile, text=t, font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="w")
-            tk.Label(tile, text=v, font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"] if i != 1 and i != 2 else "#E05252", bg="#F7FCFC").pack(anchor="w", pady=(1, 1))
+            v_lbl = tk.Label(tile, text=v, font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"] if i != 1 and i != 2 else "#E05252", bg="#F7FCFC")
+            v_lbl.pack(anchor="w", pady=(1, 1))
+            metric_lbls[t] = v_lbl
             tk.Label(tile, text=s, font=("Segoe UI", 6), fg=self.colors["gray_text"], bg="#F7FCFC").pack(anchor="w")
 
         # Calculation Multi-Column Grid
         cols = [
             ("Employee", 3, "w"),
-            ("Base Salary", 2, "e"),
+            ("Base Salary ($)", 2, "e"),
             ("Gross Earnings", 2, "e"),
-            ("Federal Tax", 2, "e"),
-            ("State Tax", 2, "e"),
-            ("FICA / Medicare", 2, "e"),
-            ("Benefits", 2, "e"),
+            ("BIR Tax (TRAIN)", 2, "e"),
+            ("SSS Contrib.", 2, "e"),
+            ("PhilHealth/HDMF", 2, "e"),
+            ("Statutory Deductions", 2, "e"),
             ("Net Take-Home", 2, "e")
         ]
 
@@ -1047,15 +1391,101 @@ class SteadypayProcessPayPage(tk.Tk):
             av.create_text(14, 14, text=emp["initials"], fill="#FFFFFF", font=("Segoe UI", 7, "bold"))
             tk.Label(emp_box, text=emp["name"], font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(side="left")
 
-            tk.Label(grid_frame, text=f"${emp['base_salary']:,.2f}", font=("Segoe UI", 8), fg=self.colors["text_dark"], bg=self.colors["white"], anchor="e").grid(row=r_idx, column=1, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"${emp['gross_pay']:,.2f}", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"], anchor="e").grid(row=r_idx, column=2, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"-${emp['fed_tax']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e").grid(row=r_idx, column=3, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"-${emp['state_tax']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e").grid(row=r_idx, column=4, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"-${emp['fica_tax']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e").grid(row=r_idx, column=5, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"-${emp['total_benefits']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e").grid(row=r_idx, column=6, sticky="ew", padx=6, pady=4)
-            tk.Label(grid_frame, text=f"${emp['net_pay']:,.2f}", font=("Segoe UI", 9, "bold"), fg=self.colors["deep_teal"], bg=self.colors["white"], anchor="e").grid(row=r_idx, column=7, sticky="ew", padx=6, pady=4)
+            # Col 1: Base Salary inline Entry (Changable like Step 2 adjustments)
+            sal_var = tk.StringVar(value=f"{emp['base_salary']:.2f}")
+            sal_frame = tk.Frame(grid_frame, bg=self.colors["white"])
+            sal_frame.grid(row=r_idx, column=1, sticky="e", padx=6, pady=3)
+            tk.Label(sal_frame, text="$", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(side="left")
+            sal_entry = tk.Entry(
+                sal_frame,
+                textvariable=sal_var,
+                font=("Segoe UI", 8, "bold"),
+                fg=self.colors["dark_teal"],
+                bg=self.colors["white"],
+                highlightbackground=self.colors["border_peach"],
+                highlightcolor=self.colors["primary_orange"],
+                highlightthickness=1,
+                bd=0,
+                width=8,
+                justify="right"
+            )
+            sal_entry.pack(side="left", ipady=2)
+
+            # Col 2-7: Auto-computed figures with live labels
+            gross_lbl = tk.Label(grid_frame, text=f"${emp['gross_pay']:,.2f}", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"], anchor="e")
+            gross_lbl.grid(row=r_idx, column=2, sticky="ew", padx=6, pady=4)
+
+            fed_lbl = tk.Label(grid_frame, text=f"-${emp['fed_tax']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e")
+            fed_lbl.grid(row=r_idx, column=3, sticky="ew", padx=6, pady=4)
+
+            state_lbl = tk.Label(grid_frame, text=f"-${emp['state_tax']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e")
+            state_lbl.grid(row=r_idx, column=4, sticky="ew", padx=6, pady=4)
+
+            fica_lbl = tk.Label(grid_frame, text=f"-${emp['fica_tax']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e")
+            fica_lbl.grid(row=r_idx, column=5, sticky="ew", padx=6, pady=4)
+
+            ben_lbl = tk.Label(grid_frame, text=f"-${emp['total_benefits']:,.2f}", font=("Segoe UI", 8), fg="#E05252", bg=self.colors["white"], anchor="e")
+            ben_lbl.grid(row=r_idx, column=6, sticky="ew", padx=6, pady=4)
+
+            net_lbl = tk.Label(grid_frame, text=f"${emp['net_pay']:,.2f}", font=("Segoe UI", 9, "bold"), fg=self.colors["deep_teal"], bg=self.colors["white"], anchor="e")
+            net_lbl.grid(row=r_idx, column=7, sticky="ew", padx=6, pady=4)
+
+            # Live calculation bind handler for real-time recalculation
+            def _bind_step3_row(e_ref, ent, gl, fl, sl, fcl, bl, nl):
+                def _on_change(*args):
+                    try:
+                        raw = ent.get().replace("$", "").replace(",", "").strip()
+                        s_val = float(raw or 0)
+                        e_ref["base_salary"] = s_val
+                        if s_val > 0:
+                            e_ref["hourly_rate"] = round(s_val / 160.0, 2)
+                        self.recalculate_live_engine()
+
+                        # Update row labels
+                        gl.config(text=f"${e_ref['gross_pay']:,.2f}")
+                        fl.config(text=f"-${e_ref['fed_tax']:,.2f}")
+                        sl.config(text=f"-${e_ref['state_tax']:,.2f}")
+                        fcl.config(text=f"-${e_ref['fica_tax']:,.2f}")
+                        bl.config(text=f"-${e_ref['total_benefits']:,.2f}")
+                        nl.config(text=f"${e_ref['net_pay']:,.2f}")
+
+                        # Update Step 3 Metric Tiles
+                        tot_g = sum(i["gross_pay"] for i in self.payroll_items)
+                        tot_t = sum(i["total_tax"] for i in self.payroll_items)
+                        tot_b = sum(i["total_benefits"] for i in self.payroll_items)
+                        tot_n = sum(i["net_pay"] for i in self.payroll_items)
+
+                        if "TOTAL GROSS PAY" in metric_lbls:
+                            metric_lbls["TOTAL GROSS PAY"].config(text=f"${tot_g:,.2f}")
+                        if "TOTAL TAX WITHHOLDING" in metric_lbls:
+                            metric_lbls["TOTAL TAX WITHHOLDING"].config(text=f"-${tot_t:,.2f}")
+                        if "STATUTORY CONTRIBUTIONS" in metric_lbls:
+                            metric_lbls["STATUTORY CONTRIBUTIONS"].config(text=f"-${tot_b:,.2f}")
+                        if "NET DISBURSEMENT" in metric_lbls:
+                            metric_lbls["NET DISBURSEMENT"].config(text=f"${tot_n:,.2f}")
+
+                        self.update_live_summary_bar()
+                    except ValueError:
+                        pass
+                return _on_change
+
+            handler = _bind_step3_row(emp, sal_entry, gross_lbl, fed_lbl, state_lbl, fica_lbl, ben_lbl, net_lbl)
+            sal_entry.sal_var = sal_var
+            sal_var.trace_add("write", handler)
+            for w in (sal_entry,):
+                w.bind("<KeyRelease>", handler)
+                w.bind("<FocusOut>", handler)
+                w.bind("<Return>", handler)
+                w.bind("<Tab>", handler)
 
     def action_run_recalc_step3(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Restricted Action",
+                "Standard Admins cannot execute manual tax engine overrides or statutory formula recalculations.\nSuper Admin access required.",
+                parent=self
+            )
+            return
         self.recalculate_live_engine()
         self.render_active_step()
         messagebox.showinfo("Calculation Complete", "Payroll calculation engine executed successfully.\nAll statutory tax withholdings are up-to-date.", parent=self)
@@ -1097,21 +1527,34 @@ class SteadypayProcessPayPage(tk.Tk):
             bg=self.colors["white"]
         ).pack(anchor="w", pady=(2, 0))
 
-        resolve_btn = tk.Button(
-            hdr,
-            text="✓ Clear & Approve All Exceptions",
-            font=("Segoe UI", 8, "bold"),
-            bg=self.colors["pill_approved_text"] if not self.exceptions_resolved else self.colors["sidebar_bg"],
-            fg=self.colors["white"] if not self.exceptions_resolved else self.colors["dark_teal"],
-            activebackground=self.colors["dark_teal"],
-            bd=0,
-            relief="flat",
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self.action_resolve_all_exceptions
-        )
-        resolve_btn.pack(side="right")
+        if self.user.has_role(Role.SUPER_ADMIN):
+            resolve_btn = tk.Button(
+                hdr,
+                text="✓ Clear & Approve All Exceptions",
+                font=("Segoe UI", 8, "bold"),
+                bg=self.colors["pill_approved_text"] if not self.exceptions_resolved else self.colors["sidebar_bg"],
+                fg=self.colors["white"] if not self.exceptions_resolved else self.colors["dark_teal"],
+                activebackground=self.colors["dark_teal"],
+                bd=0,
+                relief="flat",
+                cursor="hand2",
+                padx=12,
+                pady=6,
+                command=self.action_resolve_all_exceptions
+            )
+            resolve_btn.pack(side="right")
+        else:
+            badge = RoundedBadge(
+                hdr,
+                text="🔒 Super Admin Sign-Off Required for Exceptions",
+                bg_color=self.colors["pill_pending"],
+                fg_color=self.colors["pill_pending_text"],
+                radius=8,
+                width=285,
+                height=26,
+                parent_bg=self.colors["white"]
+            )
+            badge.pack(side="right")
 
         # 4 Core Rule Audits
         rules_box = tk.Frame(card, bg=self.colors["white"])
@@ -1120,7 +1563,7 @@ class SteadypayProcessPayPage(tk.Tk):
         rules = [
             ("RULE 1: Negative Net Pay Check", "Passed", "Zero employees have deductions exceeding gross salary.", self.colors["pill_approved"], self.colors["pill_approved_text"]),
             ("RULE 2: Overtime Threshold Alert", "Resolved" if self.exceptions_resolved else "Notice (1)", "Jordan Patel logged 12.0h OT (>10.0h company threshold).", self.colors["pill_approved"] if self.exceptions_resolved else self.colors["pill_warning"], self.colors["pill_approved_text"] if self.exceptions_resolved else self.colors["pill_warning_text"]),
-            ("RULE 3: W-4 Statutory Tax Compliance", "Passed", "All 5 employee W-4 tax exemptions verified.", self.colors["pill_approved"], self.colors["pill_approved_text"]),
+            ("RULE 3: BIR Statutory Tax Compliance", "Passed", "All 5 employee BIR Form 2316 exemptions & TRAIN brackets verified.", self.colors["pill_approved"], self.colors["pill_approved_text"]),
             ("RULE 4: Pay Variance vs Prior Period", "Resolved" if self.exceptions_resolved else "Notice (1)", "Sofia Chen bonus entry reflects +11.2% variance.", self.colors["pill_approved"] if self.exceptions_resolved else self.colors["pill_warning"], self.colors["pill_approved_text"] if self.exceptions_resolved else self.colors["pill_warning_text"])
         ]
 
@@ -1141,10 +1584,22 @@ class SteadypayProcessPayPage(tk.Tk):
         detail_card.pack(fill="x")
 
         tk.Label(detail_card, text="AUDIT EXCEPTION LOGS & SIGN-OFF", font=("Segoe UI", 8, "bold"), fg=self.colors["primary_orange"], bg="#FFFDF7").pack(anchor="w")
-        status_msg = "All exceptions have been reviewed and approved by Payroll Admin." if self.exceptions_resolved else "2 non-blocking warnings pending administrator sign-off before final lock."
+        if self.exceptions_resolved:
+            status_msg = "All exceptions have been reviewed and approved by Super Admin."
+        elif not self.user.has_role(Role.SUPER_ADMIN):
+            status_msg = "2 non-blocking warnings logged. Super Admin sign-off is required before final disbursement authorization."
+        else:
+            status_msg = "2 non-blocking warnings pending administrator sign-off before final lock."
         tk.Label(detail_card, text=status_msg, font=("Segoe UI", 8), fg=self.colors["text_dark"], bg="#FFFDF7").pack(anchor="w", pady=(2, 0))
 
     def action_resolve_all_exceptions(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Permission Denied",
+                "Audit exception sign-offs and compliance overrides require Super Admin authorization.\nStandard Admins cannot override critical audit checks.",
+                parent=self
+            )
+            return
         self.exceptions_resolved = True
         self.render_active_step()
         messagebox.showinfo("Audit Sign-off", "All payroll audit flags and variance notices have been officially acknowledged and verified.", parent=self)
@@ -1230,14 +1685,15 @@ class SteadypayProcessPayPage(tk.Tk):
         triggers_frame = tk.Frame(card, bg=self.colors["white"])
         triggers_frame.pack(fill="x", pady=(0, 14))
 
+        is_super = self.user.has_role(Role.SUPER_ADMIN)
         triggers = [
-            ("📄 1. Digital Payslips Generation", "Generate and stamp PDF statement records for all 5 employees.", "Generate Slips", self.action_trigger_payslips),
-            ("🏦 2. NACHA / ACH Direct Deposit File", "Compile batch ACH transfer instructions for corporate banking.", "Create ACH File", self.action_trigger_ach),
-            ("📧 3. Automated Employee Notification", "Dispatch secured salary notices and direct deposit confirmation emails.", "Email Staff", self.action_trigger_email),
-            ("🔒 4. Period Lock & Compliance Seal", "Seal current cycle against inadvertent retroactive changes.", "Seal Cycle", self.action_trigger_lock)
+            ("📄 1. Digital Payslips Generation", "Generate and stamp PDF statement records for all 5 employees.", "Generate Slips", self.action_trigger_payslips, True),
+            ("🏦 2. NACHA / ACH Direct Deposit File", "Compile batch ACH transfer instructions for corporate banking. (Super Admin Only)", "Create ACH File" if is_super else "Locked 🔒", self.action_trigger_ach, is_super),
+            ("📧 3. Automated Employee Notification", "Dispatch secured salary notices and direct deposit confirmation emails.", "Email Staff", self.action_trigger_email, True),
+            ("🔒 4. Period Lock & Compliance Seal", "Seal current cycle against inadvertent retroactive changes. (Super Admin Only)", "Seal Cycle" if is_super else "Locked 🔒", self.action_trigger_lock, is_super)
         ]
 
-        for title, desc, btn_text, cmd in triggers:
+        for title, desc, btn_text, cmd, enabled in triggers:
             row = tk.Frame(triggers_frame, bg="#F9FCFC", highlightbackground=self.colors["border_light"], highlightthickness=1, padx=14, pady=10)
             row.pack(fill="x", pady=3)
 
@@ -1250,12 +1706,13 @@ class SteadypayProcessPayPage(tk.Tk):
                 row,
                 text=btn_text,
                 font=("Segoe UI", 8, "bold"),
-                bg=self.colors["sidebar_bg"],
-                fg=self.colors["dark_teal"],
+                bg=self.colors["sidebar_bg"] if enabled else "#F4F7F7",
+                fg=self.colors["dark_teal"] if enabled else self.colors["gray_text"],
                 activebackground=self.colors["border_peach"],
                 bd=0,
                 relief="flat",
-                cursor="hand2",
+                cursor="hand2" if enabled else "arrow",
+                state="normal" if enabled else "disabled",
                 padx=12,
                 pady=5,
                 command=cmd
@@ -1266,6 +1723,13 @@ class SteadypayProcessPayPage(tk.Tk):
         messagebox.showinfo("Payslips Generated", f"✓ Digital payslip vouchers generated for all {len(self.payroll_items)} employees.\nAvailable under 'Payroll & Payslips' ledger.", parent=self)
 
     def action_trigger_ach(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Access Restricted",
+                "Generation of corporate NACHA / ACH Direct Deposit banking batches is restricted to Super Admins only.",
+                parent=self
+            )
+            return
         tot_net = sum(i["net_pay"] for i in self.payroll_items)
         messagebox.showinfo("ACH Batch Exported", f"✓ Corporate NACHA Direct Deposit batch generated successfully!\nTotal EFT: ${tot_net:,.2f}\nDestination: Chase Commercial ACH Gateway.", parent=self)
 
@@ -1273,11 +1737,33 @@ class SteadypayProcessPayPage(tk.Tk):
         messagebox.showinfo("Notifications Sent", "✓ Notification emails and encrypted payslip links dispatched to employee mailboxes.", parent=self)
 
     def action_trigger_lock(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            messagebox.showwarning(
+                "Access Restricted",
+                "Period Lock & Compliance Seals can only be executed by Super Admins.",
+                parent=self
+            )
+            return
         self.period_locked = True
         self.render_active_step()
         messagebox.showinfo("Period Sealed", f"✓ Pay Period '{self.pay_period_name}' is now Approved & Locked.\nAccidental overrides are strictly prevented.", parent=self)
 
+    def action_submit_for_super_admin_approval(self):
+        tot_net = sum(i["net_pay"] for i in self.payroll_items)
+        messagebox.showinfo(
+            "Submitted for Super Admin Approval 📋",
+            f"Payroll cycle '{self.pay_period_name}' draft has been compiled and submitted for Super Admin review!\n\n"
+            f"• Action: Submitted by {self.admin_data['name']} (Standard Admin)\n"
+            f"• Headcount: {len(self.payroll_items)} employees\n"
+            f"• Calculated Net Disbursement: ${tot_net:,.2f}\n"
+            f"• Status: Awaiting Super Admin final audit clearance, NACHA batch release & compliance seal.",
+            parent=self
+        )
+
     def action_finalize_payroll_cycle(self):
+        if not self.user.has_role(Role.SUPER_ADMIN):
+            self.action_submit_for_super_admin_approval()
+            return
         self.period_locked = True
         self.render_active_step()
         messagebox.showinfo(
@@ -1285,7 +1771,7 @@ class SteadypayProcessPayPage(tk.Tk):
             f"Payroll cycle '{self.pay_period_name}' has been successfully finalized and processed!\n\n"
             f"Total Employees: {len(self.payroll_items)}\n"
             f"Total Net Pay Disbursed: ${sum(i['net_pay'] for i in self.payroll_items):,.2f}\n"
-            f"All payslips, ACH batches, and statutory records have been saved.",
+            f"All payslips, bank disbursement batches, and BIR statutory records have been saved.",
             parent=self
         )
 
@@ -1293,17 +1779,24 @@ class SteadypayProcessPayPage(tk.Tk):
     # NAVIGATION HANDLERS
     # ==========================================
     def navigate_to_dashboard(self):
+        if self.controller:
+            self.controller.show_page("dashboard")
+            return
         self.destroy()
         dashboard_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aDashboard.py")
         if os.path.exists(dashboard_script):
             subprocess.Popen([sys.executable, dashboard_script])
 
     def handle_logout(self):
+        if self.controller:
+            self.controller.handle_logout()
+            return
         self.destroy()
         login_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "login.py")
         if os.path.exists(login_script):
             subprocess.Popen([sys.executable, login_script])
 
 if __name__ == "__main__":
-    app = SteadypayProcessPayPage()
+    from aDashboard import SteadypayAdminDashboard
+    app = SteadypayAdminDashboard(initial_page="process_pay")
     app.mainloop()

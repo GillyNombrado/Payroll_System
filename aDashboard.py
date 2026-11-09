@@ -2,20 +2,23 @@ import os
 import sys
 import subprocess
 import datetime
+import importlib
 import tkinter as tk
 from tkinter import ttk, messagebox
 from data import (
     get_admin_data, get_all_employees, compute_payroll_summary,
-    draw_rounded_rectangle, RoundedBadge
+    draw_rounded_rectangle, RoundedBadge, Role, get_current_user
 )
 
 class SteadypayAdminDashboard(tk.Tk):
-    def __init__(self):
+    def __init__(self, initial_page="dashboard"):
         super().__init__()
 
+        self.initial_page = initial_page
+        self.user = get_current_user()
         self.title("Steadypay - Payroll Dashboard (Admin)")
-        self.geometry("1200x750")
-        self.minsize(1100, 680)
+        self.geometry("1240x780")
+        self.minsize(1120, 680)
         self.configure(bg="#FFFFFF")
 
         # Color Palette Definition (Based on Steadypay visual design)
@@ -36,6 +39,7 @@ class SteadypayAdminDashboard(tk.Tk):
             "text_dark": "#2C3E50",        # Main dark text
             "gray_text": "#788896",        # Subtitle / placeholder gray
             "border_light": "#E8ECEB",     # Light divider border
+            "border_peach": "#FFDDB7",
             "avatar_orange": "#FF9F1C",
             "avatar_mint": "#4ED8C8"
         }
@@ -45,8 +49,10 @@ class SteadypayAdminDashboard(tk.Tk):
         self.employees = get_all_employees()
         self.filtered_employees = list(self.employees)
 
-        # Track current page and sidebar button widget references
+        # Track current page, view frames, and sidebar buttons
         self.current_page = None
+        self.current_frame = None
+        self.pages = {}
         self.sidebar_buttons = []
 
         self.setup_layout()
@@ -55,11 +61,15 @@ class SteadypayAdminDashboard(tk.Tk):
         # 1. Left Fixed Sidebar
         self.create_sidebar()
 
-        # 2. Right Main Scrollable Area (empty container)
-        self.create_scrollable_main_content()
+        # 2. Right Main Scrollable Container Frame
+        self.main_container = tk.Frame(self, bg=self.colors["white"])
+        self.main_container.pack(side="right", fill="both", expand=True)
 
-        # 3. Show Dashboard by default
-        self.show_page("dashboard")
+        # 3. Create Dashboard View Frame
+        self.create_dashboard_view()
+
+        # 4. Display Initial Page
+        self.show_page(self.initial_page)
 
     # ==========================================
     # SIDEBAR NAVIGATION
@@ -96,7 +106,7 @@ class SteadypayAdminDashboard(tk.Tk):
         # Navigation Menu List (active state is set dynamically by show_page)
         menu_items = [
             ("🏠", "Dashboard"),
-            ("👥", "Employee\nmanagement"),
+            ("👥", "Workforce\nDirectory"),
             ("💳", "Process payroll"),
             ("📄", "Payroll &\nPayslips"),
             ("⚙️", "Settings")
@@ -189,25 +199,16 @@ class SteadypayAdminDashboard(tk.Tk):
             )
 
     def on_menu_click(self, menu_name):
-        """Handles sidebar menu item clicks.
-        Dashboard stays in-window; all other pages navigate to their own script."""
-        if menu_name == "Dashboard":
-            self.show_page("dashboard")
-            return
-
-        # Map non-dashboard items to their script files
-        menu_to_script = {
-            "Employee\nmanagement": "aEmployee.py",
-            "Process payroll":      "aProcessPay.py",
-            "Payroll &\nPayslips":  "aPayRecord&Slip.py",
-            "Settings":             "aSettings.py"
+        """Handles sidebar menu item clicks with smooth in-window transitions."""
+        menu_to_page = {
+            "Dashboard": "dashboard",
+            "Workforce\nDirectory": "employee",
+            "Process payroll": "process_pay",
+            "Payroll &\nPayslips": "pay_records_slips",
+            "Settings": "settings"
         }
-        script = menu_to_script.get(menu_name)
-        if script:
-            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script)
-            if os.path.exists(script_path):
-                self.destroy()
-                subprocess.Popen([sys.executable, script_path])
+        page = menu_to_page.get(menu_name, "dashboard")
+        self.show_page(page)
 
     # ==========================================
     # PAGE SWITCHING (SMOOTH IN-PLACE NAVIGATION)
@@ -215,76 +216,69 @@ class SteadypayAdminDashboard(tk.Tk):
     def show_page(self, page_name):
         """Switches the right-side content to the specified page instantly,
         without closing or reopening the window."""
-        if page_name == self.current_page:
+        if page_name == self.current_page and self.current_frame is not None:
             return
+
+        # Hide current active frame
+        if self.current_frame is not None:
+            self.current_frame.pack_forget()
+
         self.current_page = page_name
 
-        # Clear all existing content widgets
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
+        # Lazy instantiate page if not already loaded
+        if page_name not in self.pages:
+            if page_name == "employee":
+                from aEmployee import SteadypayEmployeePage
+                self.pages["employee"] = SteadypayEmployeePage(self.main_container, controller=self)
+            elif page_name == "process_pay":
+                from aProcessPay import SteadypayProcessPayPage
+                self.pages["process_pay"] = SteadypayProcessPayPage(self.main_container, controller=self)
+            elif page_name == "pay_records_slips":
+                mod = importlib.import_module("aPayRecord&Slip")
+                self.pages["pay_records_slips"] = mod.SteadypayPayrollPayslipsPage(self.main_container, controller=self)
+            elif page_name == "settings":
+                from aSettings import SteadypaySettingsPage
+                self.pages["settings"] = SteadypaySettingsPage(self.main_container, controller=self)
 
-        # Scroll back to top
-        self.main_canvas.yview_moveto(0)
+        target_frame = self.pages.get(page_name)
+        if target_frame is not None:
+            target_frame.pack(fill="both", expand=True)
+            self.current_frame = target_frame
+            if hasattr(target_frame, "on_show"):
+                target_frame.on_show()
 
-        # Page configuration: (badge_text, description, active_sidebar_menu_title)
-        page_config = {
-            "dashboard": (
-                "PAYROLL DASHBOARD",
-                "Manage employees, payroll runs, and records from one secure workspace.",
-                "Dashboard"
-            ),
-            "employee": (
-                "EMPLOYEE MANAGEMENT",
-                "View and manage all employee records and profiles.",
-                "Employee\nmanagement"
-            ),
-            "process_pay": (
-                "PROCESS PAYROLL",
-                "Run and manage payroll processing cycles.",
-                "Process payroll"
-            ),
-            "pay_records_slips": (
-                "PAYROLL & PAYSLIPS",
-                "Review payroll records and generate employee payslips.",
-                "Payroll &\nPayslips"
-            ),
-            "settings": (
-                "SETTINGS",
-                "Configure system preferences and account settings.",
-                "Settings"
-            )
+        # Update sidebar active highlight
+        page_to_menu = {
+            "dashboard": "Dashboard",
+            "employee": "Workforce\nDirectory",
+            "process_pay": "Process payroll",
+            "pay_records_slips": "Payroll &\nPayslips",
+            "settings": "Settings"
         }
-
-        badge_text, desc_text, active_menu = page_config[page_name]
-
-        # Update sidebar highlight
+        active_menu = page_to_menu.get(page_name, "Dashboard")
         self.update_sidebar_active(active_menu)
 
         # Update window title
-        self.title(f"Steadypay - {badge_text.title()} (Admin)")
-
-        # Update the fixed header labels in-place (header lives outside the canvas)
-        self.badge_lbl.config(text=badge_text)
-        self.desc_lbl.config(text=desc_text)
-
-        # Build page-specific content below the header
-        if page_name == "dashboard":
-            self.create_summary_cards(self.content_frame)
-            self.create_split_layout(self.content_frame)
-        # Other pages: right side is empty for now as requested
+        page_titles = {
+            "dashboard": "Payroll Dashboard",
+            "employee": "Workforce Directory",
+            "process_pay": "Process Payroll",
+            "pay_records_slips": "Payroll & Payslips",
+            "settings": "Workspace & System Settings"
+        }
+        self.title(f"Steadypay - {page_titles.get(page_name, 'Workspace')} (Admin)")
 
     # ==========================================
-    # SCROLLABLE MAIN CONTENT AREA
+    # DASHBOARD MAIN VIEW
     # ==========================================
-    def create_scrollable_main_content(self):
-        right_container = tk.Frame(self, bg=self.colors["white"])
-        right_container.pack(side="right", fill="both", expand=True)
+    def create_dashboard_view(self):
+        self.dashboard_frame = tk.Frame(self.main_container, bg=self.colors["white"])
 
         # Fixed header — lives outside the canvas so it never scrolls
-        self.create_top_header(right_container)
+        self.create_top_header(self.dashboard_frame)
 
-        self.main_canvas = tk.Canvas(right_container, bg=self.colors["white"], highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(right_container, orient="vertical", command=self.main_canvas.yview)
+        self.main_canvas = tk.Canvas(self.dashboard_frame, bg=self.colors["white"], highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.dashboard_frame, orient="vertical", command=self.main_canvas.yview)
 
         # Content frame inside canvas
         self.content_frame = tk.Frame(self.main_canvas, bg=self.colors["white"], padx=26, pady=20)
@@ -304,11 +298,25 @@ class SteadypayAdminDashboard(tk.Tk):
         self.main_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Mouse wheel support
-        def _on_mousewheel(event):
+        self.main_canvas.bind("<MouseWheel>", self._on_mousewheel)
+
+        self.create_summary_cards(self.content_frame)
+        self.create_split_layout(self.content_frame)
+
+        self.pages["dashboard"] = self.dashboard_frame
+
+    def _on_mousewheel(self, event):
+        if hasattr(self, "main_canvas") and self.main_canvas.winfo_exists():
             self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    def on_show(self):
+        """Called whenever the dashboard tab is brought into view."""
+        if hasattr(self, "main_canvas"):
+            self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.employees = get_all_employees()
+        self.filtered_employees = list(self.employees)
+        if hasattr(self, "table_grid") and hasattr(self, "render_table_rows"):
+            self.render_table_rows()
 
     def create_top_header(self, parent, badge_text="PAYROLL DASHBOARD", desc_text="Manage employees, payroll runs, and records from one secure workspace."):
         header_frame = tk.Frame(parent, bg=self.colors["white"], padx=26, pady=20)
@@ -395,7 +403,7 @@ class SteadypayAdminDashboard(tk.Tk):
 
         role_lbl = tk.Label(
             profile_info,
-            text=self.admin_data["role"],
+            text=f"{self.user.role_title}",
             font=("Segoe UI", 7),
             fg=self.colors["gray_text"],
             bg=self.colors["white"]
@@ -655,7 +663,6 @@ class SteadypayAdminDashboard(tk.Tk):
         left_cards_col = tk.Frame(split_frame, bg=self.colors["white"])
         left_cards_col.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
 
-        self.create_quick_actions_card(left_cards_col)
         self.create_dept_spending_card(left_cards_col)
         self.create_compliance_card(left_cards_col)
 
@@ -669,61 +676,16 @@ class SteadypayAdminDashboard(tk.Tk):
     # LEFT COLUMN CARDS
     # ==========================================
     def navigate_to_script(self, script_name):
-        """Helper to navigate to target script file."""
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_name)
-        if os.path.exists(script_path):
-            self.destroy()
-            subprocess.Popen([sys.executable, script_path])
-
-    def create_quick_actions_card(self, parent):
-        """Quick action navigation hub card."""
-        card = tk.Frame(
-            parent,
-            bg=self.colors["white"],
-            highlightbackground=self.colors["border_peach"],
-            highlightthickness=1,
-            padx=14,
-            pady=12
-        )
-        card.pack(fill="x", pady=(0, 12))
-
-        tk.Label(card, text="QUICK ACTIONS", font=("Segoe UI", 7, "bold"), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
-        tk.Label(card, text="Payroll Operations Hub", font=("Segoe UI", 11, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(1, 8))
-
-        # 1. Run Payroll Button
-        run_btn = tk.Frame(card, bg=self.colors["primary_orange"], cursor="hand2", padx=12, pady=7)
-        run_btn.pack(fill="x", pady=(0, 6))
-        tk.Label(run_btn, text="💳", font=("Segoe UI", 11), bg=self.colors["primary_orange"], fg="#FFFFFF").pack(side="left", padx=(0, 8))
-        run_txt = tk.Frame(run_btn, bg=self.colors["primary_orange"])
-        run_txt.pack(side="left")
-        tk.Label(run_txt, text="Run Payroll Cycle", font=("Segoe UI", 8, "bold"), fg="#FFFFFF", bg=self.colors["primary_orange"]).pack(anchor="w")
-        tk.Label(run_txt, text="Compute & disburse next period", font=("Segoe UI", 6), fg="#FFE8D0", bg=self.colors["primary_orange"]).pack(anchor="w")
-
-        # 2. Payroll & Payslips Button
-        slip_btn = tk.Frame(card, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1, cursor="hand2", padx=12, pady=7)
-        slip_btn.pack(fill="x", pady=(0, 6))
-        tk.Label(slip_btn, text="📄", font=("Segoe UI", 11), bg=self.colors["white"], fg=self.colors["dark_teal"]).pack(side="left", padx=(0, 8))
-        slip_txt = tk.Frame(slip_btn, bg=self.colors["white"])
-        slip_txt.pack(side="left")
-        tk.Label(slip_txt, text="Payroll & Payslips", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w")
-        tk.Label(slip_txt, text="Master ledger, tax slips & NACHA export", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
-
-        # 3. Add Employee Button
-        add_btn = tk.Frame(card, bg=self.colors["white"], highlightbackground=self.colors["border_peach"], highlightthickness=1, cursor="hand2", padx=12, pady=7)
-        add_btn.pack(fill="x")
-        tk.Label(add_btn, text="👤➕", font=("Segoe UI", 10), bg=self.colors["white"], fg=self.colors["dark_teal"]).pack(side="left", padx=(0, 8))
-        add_txt = tk.Frame(add_btn, bg=self.colors["white"])
-        add_txt.pack(side="left")
-        tk.Label(add_txt, text="Add Employee", font=("Segoe UI", 8, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w")
-        tk.Label(add_txt, text="Register team member & salary details", font=("Segoe UI", 6), fg=self.colors["gray_text"], bg=self.colors["white"]).pack(anchor="w")
-
-        # Binds
-        for w in (run_btn, run_txt) + tuple(run_btn.winfo_children()) + tuple(run_txt.winfo_children()):
-            w.bind("<Button-1>", lambda e: self.navigate_to_script("aProcessPay.py"))
-        for w in (slip_btn, slip_txt) + tuple(slip_btn.winfo_children()) + tuple(slip_txt.winfo_children()):
-            w.bind("<Button-1>", lambda e: self.navigate_to_script("aPayRecord&Slip.py"))
-        for w in (add_btn, add_txt) + tuple(add_btn.winfo_children()) + tuple(add_txt.winfo_children()):
-            w.bind("<Button-1>", lambda e: self.navigate_to_script("aEmployee.py"))
+        """Helper to navigate smoothly in-window without closing and reopening."""
+        script_to_page = {
+            "aDashboard.py": "dashboard",
+            "aEmployee.py": "employee",
+            "aProcessPay.py": "process_pay",
+            "aPayRecord&Slip.py": "pay_records_slips",
+            "aSettings.py": "settings"
+        }
+        page = script_to_page.get(script_name, "dashboard")
+        self.show_page(page)
 
     def create_dept_spending_card(self, parent):
         """Department budget allocation card with visual horizontal progress bars."""
@@ -757,7 +719,7 @@ class SteadypayAdminDashboard(tk.Tk):
             self.draw_progress_bar(card, percentage=pct, fg_color=bar_col, height=4)
 
     def create_compliance_card(self, parent):
-        """Compliance and payroll security card."""
+        """Compliance and payroll security card with strictly Read-Only period lock status."""
         card = tk.Frame(
             parent,
             bg=self.colors["white"],
@@ -773,8 +735,8 @@ class SteadypayAdminDashboard(tk.Tk):
 
         checklist = [
             ("Direct Deposit EFT", "100% Active", self.colors["pill_approved"], self.colors["pill_approved_text"]),
-            ("Statutory Tax Withholding", "IRS 2026 Compliant", self.colors["pill_approved"], self.colors["pill_approved_text"]),
-            ("Period Lock & Seal", "Locked to prevent edits", self.colors["pill_pending"], self.colors["pill_pending_text"])
+            ("Statutory Tax Withholding", "BIR & TRAIN Compliant", self.colors["pill_approved"], self.colors["pill_approved_text"]),
+            ("Period Lock & Seal", "Locked (Read-Only)", self.colors["pill_pending"], self.colors["pill_pending_text"])
         ]
 
         for label, status, bg_col, fg_col in checklist:
