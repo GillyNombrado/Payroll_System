@@ -509,9 +509,6 @@ class SteadypaySettingsPage(tk.Frame):
     def switch_tab(self, tab_key):
         if self.active_tab != tab_key:
             self.active_tab = tab_key
-            # Reset view toggles when switching tabs
-            self.tax_view_visible = False
-            self.rules_view_visible = False
             self.update_tab_buttons_visuals()
             self.render_active_tab()
 
@@ -557,8 +554,6 @@ class SteadypaySettingsPage(tk.Frame):
         status_badge = RoundedBadge(hdr, text="✓ Verified Entity", bg_color=self.colors["pill_approved"], fg_color=self.colors["pill_approved_text"], radius=8, width=120, height=22, parent_bg=self.colors["white"])
         status_badge.pack(side="right")
 
-        is_super = self.user.has_role(Role.SUPER_ADMIN)
-
         # Form Fields Frame
         form_frame = tk.Frame(card, bg=self.colors["white"])
         form_frame.pack(fill="both", expand=True)
@@ -585,6 +580,8 @@ class SteadypaySettingsPage(tk.Frame):
 
             input_box = tk.Frame(form_frame, bg=self.colors["white"])
             input_box.grid(row=idx, column=1, sticky="ew", pady=7)
+
+            is_super = self.user.has_role(Role.SUPER_ADMIN)
 
             if key == "currency":
                 if not is_super:
@@ -698,23 +695,7 @@ class SteadypaySettingsPage(tk.Frame):
         tk.Label(left_hdr, text="BIR Withholding (TRAIN Law), SSS, PhilHealth, and Pag-IBIG statutory formulas & legal caps.", font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(2, 0))
 
         status_badge = RoundedBadge(hdr, text="✓ BIR & TRAIN Compliant", bg_color=self.colors["pill_approved"], fg_color=self.colors["pill_approved_text"], radius=8, width=150, height=22, parent_bg=self.colors["white"])
-        status_badge.pack(side="right", padx=(8, 0))
-
-        # View Toggle Button
-        def _toggle_tax_view():
-            self.tax_view_visible = not self.tax_view_visible
-            self.render_active_tab()
-
-        view_text = "🔽 Hide Statutory Taxes" if self.tax_view_visible else "👁 View Statutory Taxes"
-        tk.Button(hdr, text=view_text, font=("Segoe UI", 8, "bold"), bg=self.colors["sidebar_bg"], fg=self.colors["dark_teal"], bd=0, relief="flat", cursor="hand2", padx=12, pady=5, command=_toggle_tax_view).pack(side="right")
-
-        # Only show details when view is toggled on
-        if not self.tax_view_visible:
-            # Show a compact placeholder message
-            placeholder = tk.Frame(card, bg="#F7FCFC", highlightbackground=self.colors["border_light"], highlightthickness=1, padx=14, pady=12)
-            placeholder.pack(fill="x", pady=(0, 10))
-            tk.Label(placeholder, text="Click  '👁 View Statutory Taxes'  to display BIR, SSS, PhilHealth & Pag-IBIG configuration details.", font=("Segoe UI", 9), fg=self.colors["gray_text"], bg="#F7FCFC").pack()
-            return
+        status_badge.pack(side="right")
 
         is_super = self.user.has_role(Role.SUPER_ADMIN)
 
@@ -862,23 +843,7 @@ class SteadypaySettingsPage(tk.Frame):
         tk.Label(left_hdr, text="Organization policies for overtime multipliers, shift differentials, and leave payouts.", font=("Segoe UI", 12, "bold"), fg=self.colors["dark_teal"], bg=self.colors["white"]).pack(anchor="w", pady=(2, 0))
 
         status_badge = RoundedBadge(hdr, text="✓ Standard FLSA Rules", bg_color=self.colors["pill_approved"], fg_color=self.colors["pill_approved_text"], radius=8, width=135, height=22, parent_bg=self.colors["white"])
-        status_badge.pack(side="right", padx=(8, 0))
-
-        # View Toggle Button
-        def _toggle_rules_view():
-            self.rules_view_visible = not self.rules_view_visible
-            self.render_active_tab()
-
-        view_text = "🔽 Hide Payroll Parameters" if self.rules_view_visible else "👁 View Payroll Parameters"
-        tk.Button(hdr, text=view_text, font=("Segoe UI", 8, "bold"), bg=self.colors["sidebar_bg"], fg=self.colors["dark_teal"], bd=0, relief="flat", cursor="hand2", padx=12, pady=5, command=_toggle_rules_view).pack(side="right")
-
-        # Only show details when view is toggled on
-        if not self.rules_view_visible:
-            # Show a compact placeholder message
-            placeholder = tk.Frame(card, bg="#F7FCFC", highlightbackground=self.colors["border_light"], highlightthickness=1, padx=14, pady=12)
-            placeholder.pack(fill="x", pady=(0, 10))
-            tk.Label(placeholder, text="Click  '👁 View Payroll Parameters'  to display overtime, leave & calculation policy details.", font=("Segoe UI", 9), fg=self.colors["gray_text"], bg="#F7FCFC").pack()
-            return
+        status_badge.pack(side="right")
 
         is_super = self.user.has_role(Role.SUPER_ADMIN)
 
